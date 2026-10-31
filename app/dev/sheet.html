@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Render sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+<style>
+  body { background: #111; color: #ddd; font: 13px system-ui; margin: 12px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  figure { margin: 0; }
+  canvas { width: 216px; height: 384px; display: block; background: #222; }
+  body.big canvas { width: 540px; height: 960px; }
+  figcaption { font-size: 11px; opacity: .7; padding: 3px 0; }
+</style>
+</head>
+<body>
+<div id="info"></div>
+<div class="grid" id="grid"></div>
+<script type="module">
+import { demoProject, migrate } from '../js/model.js';
+import { compile } from '../js/timeline.js';
+import { renderFrame } from '../js/render/renderer.js';
+import { onMediaChange } from '../js/media.js';
+
+const q = new URLSearchParams(location.search);
+let p = migrate(demoProject());
+if (q.get('project')) {
+  const { getProject, loadSettings } = await import('../js/store.js');
+  const id = q.get('project') === 'last' ? loadSettings().lastProject : q.get('project');
+  p = migrate(await getProject(id));
+}
+if (q.get('big')) document.body.classList.add('big');
+for (const k of ['theme', 'device', 'layout', 'keyboard', 'startScreen', 'emojiStyle']) if (q.get(k)) p[k] = q.get(k);
+if (q.get('dark')) p.dark = q.get('dark') === '1';
+if (q.get('captions')) p.captions = true;
+const tl = compile(p);
+const n = Number(q.get('n') || 24);
+const times = q.get('t') ? q.get('t').split(',').map(Number) : Array.from({ length: n }, (_, i) => (tl.duration * i) / (n - 1));
+document.getElementById('info').textContent = `${p.theme} · ${p.device} · ${p.layout} · duration ${tl.duration.toFixed(2)}s · events ${p.events.length}`;
+await document.fonts.load('17px Inter');
+await document.fonts.load('17px Roboto');
+await document.fonts.load('17px "Noto Color Emoji"', '🎉🎂🎈🥳❤️✅👀');
+const grid = document.getElementById('grid');
+const cans = times.map((t) => {
+  const f = document.createElement('figure');
+  const c = document.createElement('canvas');
+  c.width = 1080; c.height = 1920;
+  const cap = document.createElement('figcaption');
+  cap.textContent = 't=' + t.toFixed(2);
+  f.append(c, cap);
+  grid.append(f);
+  return [c, t];
+});
+const draw = () => cans.forEach(([c, t]) => {
+  try { renderFrame(c.getContext('2d'), p, tl, t); }
+  catch (e) { console.error(e); document.getElementById('info').textContent += ' ERROR: ' + e.message; }
+});
+draw();
+onMediaChange(draw);
+window.__sheet = { p, tl, draw };
+
+// ?save=name: also write one contact-sheet PNG (cols x rows of thumbnails) to exports/_dev/name.png
+if (q.get('save')) {
+  const cols = Number(q.get('cols') || 6), tw = Number(q.get('tw') || 360), th = Math.round(tw * 16 / 9);
+  const rows = Math.ceil(cans.length / cols);
+  const out = new OffscreenCanvas(cols * tw, rows * th);
+  const g = out.getContext('2d');
+  g.fillStyle = '#111'; g.fillRect(0, 0, out.width, out.height);
+  await new Promise((r) => setTimeout(r, 400));
+  draw();
+  cans.forEach(([c], i) => g.drawImage(c, (i % cols) * tw, Math.floor(i / cols) * th, tw, th));
+  const blob = await out.convertToBlob({ type: 'image/png' });
+  const r = await fetch('/api/dev/save?name=' + encodeURIComponent(q.get('save')), { method: 'POST', body: blob });
+  document.getElementById('info').textContent += ' SAVED ' + (await r.json()).file;
+}
+</script>
+</body>
+</html>

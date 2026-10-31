@@ -1,0 +1,10 @@
+{
+  "name": "fake-phone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RMT Fake Phone - mock text conversations, calls and voice overs, exported as video",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

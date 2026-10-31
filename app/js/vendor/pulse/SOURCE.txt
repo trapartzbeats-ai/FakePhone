@@ -1,0 +1,2 @@
+Vendored from D:/Projects/pulse-core (pulse-engine 1.11.0, MIT) at commit f7f90f1
+Files: headless/dist/easing.js, headless/dist/spring.js (unchanged copies).

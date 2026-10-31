@@ -1,0 +1,7 @@
+# Rendered videos, temp export jobs and dev render sheets
+exports/
+
+node_modules/
+*.log
+.env
+.env.*

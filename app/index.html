@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fake Phone · RMT</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect x='14' y='4' width='36' height='56' rx='9' fill='%23111'/><rect x='17' y='8' width='30' height='48' rx='6' fill='%23C8FF3D'/><rect x='21' y='18' width='16' height='7' rx='3.5' fill='%23111'/><rect x='27' y='30' width='16' height='7' rx='3.5' fill='%23111'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">RMT</span><span class="word">FAKE PHONE</span></div>
+  <input id="projName" class="proj-name" spellcheck="false" aria-label="Project name">
+  <div class="top-actions">
+    <button id="btnProjects" class="btn ghost">Projects ▾</button>
+    <button id="btnUndo" class="icon-btn" title="Undo (Ctrl+Z)">↶</button>
+    <button id="btnRedo" class="icon-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
+    <span id="saveState" class="save-state">Saved</span>
+    <button id="btnExport" class="btn primary">Export video</button>
+  </div>
+</header>
+
+<main class="app">
+  <section class="script-panel">
+    <div class="panel-head">
+      <h2>Script</h2>
+      <div class="row">
+        <button id="btnPaste" class="btn ghost small">Paste script</button>
+        <button id="btnAddMenu" class="btn ghost small">+ Add</button>
+      </div>
+    </div>
+    <div id="eventList" class="event-list"></div>
+    <div class="composer">
+      <div class="composer-row">
+        <button id="senderChip" class="sender-chip me" title="Who is talking (Tab switches)">Me</button>
+        <textarea id="composerText" rows="1" placeholder="Type a message, Enter adds it"></textarea>
+        <button id="btnSend" class="send-btn" title="Add (Enter)">↑</button>
+      </div>
+      <div class="composer-tools">
+        <button data-tool="emoji" title="Emoji">😀</button>
+        <button data-tool="image" title="Send a picture">Image</button>
+        <button data-tool="gif" title="Send a GIF">GIF</button>
+        <button data-tool="voice" title="Voice note from whoever is talking (the box text is what they say)">🎤 Voice note</button>
+        <button data-tool="typing" title="Typing bubble that goes away">Typing…</button>
+        <button data-tool="pause" title="Pause">Pause</button>
+        <button data-tool="more" title="Calls, notifications, reactions…">More ▾</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="stage-panel">
+    <div class="stage-wrap"><canvas id="stage" width="1080" height="1920"></canvas></div>
+    <div class="transport">
+      <button id="btnStart" class="icon-btn" title="To start (Home)">⏮</button>
+      <button id="btnPlay" class="play-btn" title="Play / pause (Space)">▶</button>
+      <span id="timeLabel" class="time">0:00.0 / 0:00.0</span>
+      <div id="scrub" class="scrub"><div class="scrub-ticks"></div><div class="scrub-head"></div></div>
+      <button id="btnMute" class="icon-btn" title="Mute preview">🔊</button>
+      <input type="range" id="vol" min="0" max="1" step="0.01" aria-label="Preview volume">
+    </div>
+  </section>
+
+  <aside class="side-panel">
+    <nav class="tabs">
+      <button data-tab="edit">Edit</button>
+      <button data-tab="look">Look</button>
+      <button data-tab="people">People</button>
+      <button data-tab="voices">Voices &amp; Keys</button>
+      <button data-tab="sound">Sound</button>
+      <button data-tab="motion">Motion</button>
+      <button data-tab="export">Export</button>
+    </nav>
+    <div id="tabBody" class="tab-body"></div>
+  </aside>
+</main>
+<div id="toast"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
