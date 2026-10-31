@@ -12,6 +12,26 @@ node server.js
 
 Then open http://localhost:5190. Needs Node 18+ (no npm install). ffmpeg on PATH is used to write the MP4.
 
+## Desktop app (Windows installer)
+
+`dist/FakePhone-Setup-<version>.exe` installs Fake Phone as a normal Windows app (Start menu + desktop shortcut, pick the folder, uninstall from Settings > Apps). It needs nothing else installed: Electron, ffmpeg and the fonts are inside. Not code-signed, so SmartScreen may say "Windows protected your PC": More info > Run anyway.
+
+- Videos go to `Documents\Fake Phone` (Export tab > Change folder… to move them, e.g. to D:).
+- Projects and keys live in `%APPDATA%\Fake Phone` (kept on uninstall). They are separate from the browser version's; move a project across with Save / Open project file.
+- `%APPDATA%\Fake Phone\desktop.log` has the start line and any page errors.
+
+Build it:
+
+```
+npm install
+npm run desktop                                # run from source
+npm run dist                                   # dist/FakePhone-Setup-<version>.exe
+node tools/desktop-smoke.mjs                   # 17 checks from source (throwaway data in D:\Cache\fakephone-smoke)
+node tools/desktop-smoke.mjs "C:\...\Fake Phone.exe"   # the same checks on an installed copy
+```
+
+The page loads from `fakephone://app` (a secure origin, so WebCodecs and the mic work, and saved projects keep one origin) and every request is passed to `server.js`, which runs inside the app on a free port. `tools/fetch-fonts.mjs` refreshes the local fonts, `tools/make-icon.py` the installer icon. The bundled ffmpeg (ffmpeg-static, gyan.dev essentials build) is GPL: its license is in `resources/ffmpeg`.
+
 ## What it does
 
 - **Chat apps:** iMessage, Text (green), Android Messages, WhatsApp, Instagram DM. Light/dark. iPhone (Dynamic Island / notch) or Android hardware, framed on a background (gradient, color, image or green screen) or full-screen 9:16.
@@ -24,7 +44,7 @@ Then open http://localhost:5190. Needs Node 18+ (no npm install). ffmpeg on PATH
 - **Sound:** synthesized phone sounds (send, receive, notifications, key clicks, ringtone, hang up...), each replaceable with your own file. Background music (Sound tab) fades in/out and dips automatically under every voice.
 - **Voices:** per message / call line / voice-over: ElevenLabs AI voice (your key, stored only in this browser), a mic recording (silence trimmed), or an audio file. A whole-video narration take can be recorded over playback. Captions optional.
 - **Motion:** every animation runs on a PulseCore curve (`app/js/vendor/pulse`, easing + spring physics); the Motion tab sets the curve and length per animation.
-- **Export:** rendered frame by frame (WebCodecs H.264 + an offline audio mix, muxed by ffmpeg) into `exports/`. 1080x1920 or 720x1280, 30/60 fps.
+- **Export:** rendered frame by frame (WebCodecs H.264 + an offline audio mix, muxed by ffmpeg) into `exports/` (desktop app: `Documents\Fake Phone`). 1080x1920 or 720x1280, 30/60 fps.
 - **Projects** autosave in the browser (IndexedDB). "Save project file" writes one .json with images and audio inside.
 
 ## Script format
@@ -61,6 +81,8 @@ Lines above `---` are already on screen when the video starts.
 ## Layout
 
 - `server.js` - static server, ElevenLabs/GIPHY proxy, export muxing (ffmpeg)
+- `desktop/main.js` - the Electron app (window, `fakephone://` protocol, bundled ffmpeg, exports folder)
+- `app/fonts/` - local copies of Anton, Inter, Roboto, Noto Color Emoji (SIL OFL)
 - `app/js/timeline.js` - compiles the script into a timed timeline (everything is a function of time, so scrubbing and export are exact)
 - `app/js/render/` - canvas phone renderer (chat, keyboard, screens, compositor)
 - `app/js/editor.js`, `panels.js`, `ui.js` - the editor

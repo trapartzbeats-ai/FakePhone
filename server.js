@@ -1,5 +1,5 @@
 // Fake Phone local server: serves the app, proxies ElevenLabs + GIPHY, muxes exports with ffmpeg.
-// No dependencies: node server.js [port]
+// No dependencies: node server.js [port]. The desktop app (desktop/main.js) runs it through startServer().
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,12 +8,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(ROOT, 'app');
-const EXPORTS = path.join(ROOT, 'exports');
-const TMP = path.join(EXPORTS, '_tmp');
-const PORT = Number(process.argv[2] || process.env.PORT || 5190);
-
-fs.mkdirSync(TMP, { recursive: true });
-const FFMPEG = spawnSync('ffmpeg', ['-version']).status === 0 ? 'ffmpeg' : null;
+// set by startServer()
+let EXPORTS, TMP, FFMPEG;
+let pickFolder = null;   // desktop only: async (current) => new folder or null
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -82,7 +79,13 @@ async function route(req, res) {
   const u = new URL(req.url, 'http://localhost');
   const p = decodeURIComponent(u.pathname);
 
-  if (p === '/api/info') return send(res, 200, { ffmpeg: !!FFMPEG, exports: EXPORTS });
+  if (p === '/api/info') return send(res, 200, { ffmpeg: !!FFMPEG, exports: EXPORTS, pickFolder: !!pickFolder });
+
+  if (p === '/api/exports-folder' && req.method === 'POST' && pickFolder) {
+    const dir = await pickFolder(EXPORTS);
+    if (dir) { fs.mkdirSync(dir, { recursive: true }); EXPORTS = dir; }
+    return send(res, 200, { exports: EXPORTS, changed: !!dir });
+  }
 
   // ElevenLabs: the key comes from the browser (the user's own key) and is only forwarded.
   if (p.startsWith('/api/eleven/')) {
@@ -182,8 +185,28 @@ async function route(req, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-http.createServer((req, res) => {
-  route(req, res).catch((e) => { if (!res.headersSent) send(res, 500, { error: String(e.message || e) }); else res.end(); });
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`Fake Phone running at http://localhost:${PORT}  (ffmpeg: ${FFMPEG ? 'yes' : 'no'})`);
-});
+// port 0 = any free port. ffmpeg = a bundled ffmpeg.exe, else the one on PATH.
+export function startServer({ port = 5190, exportsDir = path.join(ROOT, 'exports'), tmpDir, ffmpeg, onPickFolder } = {}) {
+  EXPORTS = exportsDir;
+  TMP = tmpDir || path.join(EXPORTS, '_tmp');
+  fs.mkdirSync(EXPORTS, { recursive: true });
+  fs.mkdirSync(TMP, { recursive: true });
+  FFMPEG = [ffmpeg, 'ffmpeg'].find((f) => f && spawnSync(f, ['-version'], { windowsHide: true }).status === 0) || null;
+  pickFolder = onPickFolder || null;
+  const server = http.createServer((req, res) => {
+    route(req, res).catch((e) => { if (!res.headersSent) send(res, 500, { error: String(e.message || e) }); else res.end(); });
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve({ server, port: server.address().port, ffmpeg: FFMPEG }));
+  });
+}
+
+export const exportsDir = () => EXPORTS;
+
+// node server.js [port] (no top-level await: the desktop app imports this before Electron is ready)
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startServer({ port: Number(process.argv[2] || process.env.PORT || 5190) }).then(({ port, ffmpeg }) => {
+    console.log(`Fake Phone running at http://localhost:${port}  (ffmpeg: ${ffmpeg ? 'yes' : 'no'})`);
+  });
+}

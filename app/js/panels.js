@@ -646,9 +646,20 @@ export class Panels {
       row(field('Size', select(s.exportRes, [['1080', '1080 × 1920 (Full HD)'], ['720', '720 × 1280 (faster)']], (v) => { s.exportRes = v; ed.saveSettings(); })),
         field('Frame rate', select(String(s.exportFps), [['30', '30 fps'], ['60', '60 fps']], (v) => { s.exportFps = Number(v); ed.saveSettings(); }))),
       go, bar, label, result,
-      h('p', { class: 'hint' }, 'Rendered frame by frame (not screen-recorded), so it is exact and can run faster than real time. Files go to FakePhone/exports.')));
-    w.append(section('Your exports', listBox, btn('Open exports folder', () => fetch('/api/open-exports', { method: 'POST' }), 'ghost small')));
+      h('p', { class: 'hint' }, 'Rendered frame by frame (not screen-recorded), so it is exact and can run faster than real time.')));
+    const folder = h('p', { class: 'hint' });
+    const folderRow = row(btn('Open exports folder', () => fetch('/api/open-exports', { method: 'POST' }), 'ghost small'));
+    w.append(section('Your exports', listBox, folderRow, folder));
     this.loadExports(listBox);
+    fetch('/api/info').then((r) => r.json()).then((info) => {
+      folder.textContent = 'Saved in ' + info.exports;
+      // desktop app: the folder can be changed (a picker in the main process)
+      if (info.pickFolder) folderRow.append(btn('Change folder…', async () => {
+        const r = await (await fetch('/api/exports-folder', { method: 'POST' })).json();
+        folder.textContent = 'Saved in ' + r.exports;
+        if (r.changed) { toast('Exports folder changed'); this.loadExports(listBox); }
+      }, 'ghost small'));
+    }).catch(() => {});
     w.append(section('Project file',
       row(btn('Save project file…', () => ed.exportProject(), 'ghost small'), btn('Open project file…', () => ed.importProject(), 'ghost small')),
       h('p', { class: 'hint' }, 'One .json with the script, look, images and voice audio inside.')));

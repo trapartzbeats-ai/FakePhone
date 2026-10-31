@@ -1,6 +1,9 @@
 # Rendered videos, temp export jobs and dev render sheets
 exports/
 
+# desktop build: installers + unpacked app
+dist/
+
 node_modules/
 *.log
 .env

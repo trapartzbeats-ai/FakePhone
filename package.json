@@ -1,10 +1,72 @@
 {
   "name": "fake-phone",
+  "productName": "Fake Phone",
   "version": "0.1.0",
   "private": true,
   "description": "RMT Fake Phone - mock text conversations, calls and voice overs, exported as video",
+  "author": "RMT (Ro Made That)",
   "type": "module",
+  "main": "desktop/main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "desktop": "electron .",
+    "fonts": "node tools/fetch-fonts.mjs",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "^26.0.12",
+    "ffmpeg-static": "^5.2.0"
+  },
+  "build": {
+    "appId": "com.rmt.fakephone",
+    "productName": "Fake Phone",
+    "copyright": "RMT (Ro Made That)",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**/*",
+      "server.js",
+      "package.json",
+      "app/**/*",
+      "!app/dev/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/ffmpeg-static",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg.exe",
+          "*.LICENSE",
+          "*.README",
+          "LICENSE"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Fake Phone",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "FakePhone-Setup-${version}.exe"
+    }
   }
 }
