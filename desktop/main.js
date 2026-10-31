@@ -74,6 +74,7 @@ app.whenReady().then(async () => {
   win.removeMenu();
   win.webContents.on('console-message', (e) => { if (e.level === 'error') log('page error:', e.message); });
   win.webContents.on('render-process-gone', (e, d) => log('renderer gone:', d.reason));
+  win.webContents.on('did-finish-load', () => log('page loaded'));
   win.once('ready-to-show', () => { win.maximize(); win.show(); });
 
   // exported videos open in the system player, web links in the browser; no other app windows

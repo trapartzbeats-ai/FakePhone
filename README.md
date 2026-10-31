@@ -12,21 +12,36 @@ node server.js
 
 Then open http://localhost:5190. Needs Node 18+ (no npm install). ffmpeg on PATH is used to write the MP4.
 
-## Desktop app (Windows installer)
+## Desktop app (Windows + Mac installers)
 
-`dist/FakePhone-Setup-<version>.exe` installs Fake Phone as a normal Windows app (Start menu + desktop shortcut, pick the folder, uninstall from Settings > Apps). It needs nothing else installed: Electron, ffmpeg and the fonts are inside. Not code-signed, so SmartScreen may say "Windows protected your PC": More info > Run anyway.
+- **Windows:** `FakePhone-Setup-<version>.exe` installs Fake Phone as a normal app (Start menu + desktop shortcut, pick the folder, uninstall from Settings > Apps). Not code-signed, so SmartScreen may say "Windows protected your PC": More info > Run anyway.
+- **Mac:** `FakePhone-<version>-mac-arm64.dmg` (Apple Silicon, M1 and newer) or `-mac-x64.dmg` (Intel). Drag Fake Phone to Applications. It is ad-hoc signed, not signed with an Apple Developer ID, so the first open is blocked: System Settings > Privacy & Security > Open Anyway (once).
 
-- Videos go to `Documents\Fake Phone` (Export tab > Change folder… to move them, e.g. to D:).
-- Projects and keys live in `%APPDATA%\Fake Phone` (kept on uninstall). They are separate from the browser version's; move a project across with Save / Open project file.
-- `%APPDATA%\Fake Phone\desktop.log` has the start line and any page errors.
+Nothing else to install: Electron, ffmpeg and the fonts are inside.
 
-Build it:
+- Videos go to `Documents/Fake Phone` (Export tab > Change folder… to move them).
+- Projects and keys live in the app's user folder (`%APPDATA%\Fake Phone`, `~/Library/Application Support/Fake Phone`), kept on uninstall. They are separate from the browser version's; move a project across with Save / Open project file.
+- `desktop.log` in that folder has the start line and any page errors.
+
+### Releases (GitHub builds them)
+
+The repo is private: [trapartzbeats-ai/FakePhone](https://github.com/trapartzbeats-ai/FakePhone). `.github/workflows/build.yml` builds the Mac (arm64 + x64) and Windows installers on GitHub's machines and runs the smoke test on each built app. To release a version: bump `"version"` in `package.json`, commit, then
+
+```
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+The installers appear under Releases (and as run artifacts). The repo is private, so only people with access to it can download from there: send the .dmg / .exe itself to anyone else. Actions > Build installers > Run workflow builds without a release.
+
+### Build locally
 
 ```
 npm install
 npm run desktop                                # run from source
-npm run dist                                   # dist/FakePhone-Setup-<version>.exe
-node tools/desktop-smoke.mjs                   # 17 checks from source (throwaway data in D:\Cache\fakephone-smoke)
+npm run dist                                   # Windows: dist/FakePhone-Setup-<version>.exe
+npm run dist:mac                               # on a Mac: dist/FakePhone-<version>-mac-<arch>.dmg
+node tools/desktop-smoke.mjs                   # 20 checks from source (throwaway data in D:\Cache\fakephone-smoke)
 node tools/desktop-smoke.mjs "C:\...\Fake Phone.exe"   # the same checks on an installed copy
 ```
 
@@ -35,7 +50,7 @@ The page loads from `fakephone://app` (a secure origin, so WebCodecs and the mic
 ## What it does
 
 - **Chat apps:** iMessage, Text (green), Android Messages, WhatsApp, Instagram DM. Light/dark. iPhone (Dynamic Island / notch) or Android hardware, framed on a background (gradient, color, image or green screen) or full-screen 9:16.
-- **Script:** type in the box under the script (Enter adds, Tab switches who is talking), or paste a whole script (see below). Drag lines to reorder; Ctrl+Z/Ctrl+Shift+Z undo/redo.
+- **Script:** type in the box under the script (Enter adds, Tab switches who is talking), or paste a whole script (see below). Drag lines to reorder; Ctrl+Z/Ctrl+Shift+Z undo/redo (Cmd on a Mac).
 - **Animation:** typing bubbles, the keyboard typing your text key by key, type-then-delete hesitation (types a draft, holds delete, types the real line), bubbles popping in, reactions, Delivered/Read (blue ticks / Seen), unsend, timestamps, images and GIFs, big emoji.
 - **Send effects:** Slam, Loud, Gentle, Invisible Ink on bubbles; Confetti, Balloons, Fireworks, Love, Lasers, Celebration, Spotlight, Echo over the screen, each with its own sound.
 - **Camera:** per message (zoom in on it, punch-in, shake) or as camera beats (zoom that stays and follows the newest bubble, slow push-in, back to full view, shake). Zooms follow their target as the chat scrolls and never crop it; curves come from the Motion tab.

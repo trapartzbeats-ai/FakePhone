@@ -23,13 +23,19 @@ const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok: !!ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// a covered window stops painting (screenshots then never come back), so keep it drawing
+const FLAGS = ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
+const spawnApp = (extra = []) => spawn(EXE, [...ARGS, ...extra, ...FLAGS], {
+  env: { ...process.env, FAKEPHONE_DATA_DIR: path.join(WORK, 'data'), FAKEPHONE_EXPORTS: path.join(WORK, 'exports') },
+  stdio: 'ignore',
+});
+const exited = async (proc) => {
+  for (let i = 0; i < 40 && proc.exitCode === null && proc.signalCode === null; i++) await sleep(250);
+  if (proc.exitCode === null && proc.signalCode === null) { proc.kill(); for (let i = 0; i < 20 && proc.exitCode === null && proc.signalCode === null; i++) await sleep(250); }
+};
+
 async function launch() {
-  // a covered window stops painting (screenshots then never come back), so keep it drawing
-  const flags = ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
-  const proc = spawn(EXE, [...ARGS, `--remote-debugging-port=${PORT}`, ...flags], {
-    env: { ...process.env, FAKEPHONE_DATA_DIR: path.join(WORK, 'data'), FAKEPHONE_EXPORTS: path.join(WORK, 'exports') },
-    stdio: 'ignore',
-  });
+  const proc = spawnApp([`--remote-debugging-port=${PORT}`]);
   let target = null;
   for (let i = 0; i < 60 && !target; i++) {
     await sleep(500);
@@ -62,10 +68,13 @@ async function launch() {
     if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'page error');
     return r.result?.result?.value;
   };
-  await send('Runtime.enable');
-  await run(`for (let i = 0; i < 100 && !(window.fakePhone && window.fakePhone.tl); i++) await new Promise((r) => setTimeout(r, 100));`);
   // Browser.close never answers (the socket drops), so do not wait on it
-  const close = async () => { send('Browser.close', {}, 5).catch(() => {}); for (let i = 0; i < 40 && proc.exitCode === null; i++) await sleep(250); if (proc.exitCode === null) proc.kill(); };
+  const close = async () => { send('Browser.close', {}, 5).catch(() => {}); await exited(proc); };
+  await send('Runtime.enable');
+  // slow machines (the Intel Mac runner) can take well over 10 s to start the editor
+  const ready = await run(`for (let i = 0; i < 300 && !(window.fakePhone && window.fakePhone.tl); i++) await new Promise((r) => setTimeout(r, 100));
+    return window.fakePhone && window.fakePhone.tl ? 'ok' : (document.querySelector('.boot-error')?.textContent || 'not started after 30 s');`, 45);
+  if (ready !== 'ok') { await close(); throw new Error('the editor did not start: ' + ready); }
   return { send, run, errors: () => errors.filter((e) => !harness(e)), close };
 }
 
@@ -142,6 +151,19 @@ check('Export tab shows the folder, Change folder… and the video', tab.folder 
 check('no page errors (second launch)', a.errors().length === 0, a.errors().slice(0, 3).join(' | '));
 await a.close();
 
+// ---- third launch, the way people start it: no debugger attached; desktop.log is the only window in
+const plain = spawnApp();
+const logFile = path.join(WORK, 'data', 'desktop.log');
+let plainLog = '';
+for (let i = 0; i < 120 && !/page loaded/.test(plainLog); i++) { await sleep(250); try { plainLog = fs.readFileSync(logFile, 'utf8'); } catch { /* not written yet */ } }
+await sleep(3000);
+plainLog = fs.readFileSync(logFile, 'utf8');
+check('plain launch: page loads', /page loaded/.test(plainLog));
+check('plain launch: no page errors in desktop.log', !/page error|renderer gone/.test(plainLog), plainLog.split('\n').filter((l) => /page error|renderer gone/.test(l)).map((l) => l.slice(25)).join(' | '));
+plain.kill();
+await exited(plain);
+
 const failed = results.filter((r) => !r.ok).length;
-console.log(`\n${results.length - failed}/${results.length} passed. Screenshot: ${path.join(WORK, 'window.png')}`);
+const shotFile = path.join(WORK, 'window.png');
+console.log(`\n${results.length - failed}/${results.length} passed.${fs.existsSync(shotFile) ? ' Screenshot: ' + shotFile : ''}`);
 process.exit(failed ? 1 : 0);
