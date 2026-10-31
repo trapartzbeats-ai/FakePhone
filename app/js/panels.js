@@ -7,7 +7,7 @@ import { SOUND_SLOTS, FX_SOUNDS, peaksOf } from './audio.js';
 import { ELEVEN_MODELS, listVoices, tts, ttsKey, usesStyle, MicRecorder, trimTake } from './voice.js';
 import { MOTION_KEYS, EASE_NAMES, SPRINGS, curve } from './motion.js';
 import { exportVideo } from './export.js';
-import { uid } from './util.js';
+import { uid, IS_MAC, MOD } from './util.js';
 
 
 export class Panels {
@@ -151,8 +151,8 @@ export class Panels {
           h('ul', { class: 'tips' },
             h('li', {}, h('b', {}, 'Space'), ' play / pause'),
             h('li', {}, h('b', {}, '↑ ↓'), ' move through the script'),
-            h('li', {}, h('b', {}, 'Del'), ' delete line · ', h('b', {}, 'Ctrl+D'), ' duplicate'),
-            h('li', {}, h('b', {}, 'Ctrl+Z'), ' undo · ', h('b', {}, 'Ctrl+Shift+Z'), ' redo'),
+            h('li', {}, h('b', {}, 'Del'), ' delete line · ', h('b', {}, MOD + 'D'), ' duplicate'),
+            h('li', {}, h('b', {}, MOD + 'Z'), ' undo · ', h('b', {}, MOD + (IS_MAC ? '⇧Z' : 'Shift+Z')), ' redo'),
             h('li', {}, 'Drag lines by ', h('b', {}, '⠿'), ' to reorder'))));
     }
     const k = (s) => e.id + s;
@@ -339,7 +339,7 @@ export class Panels {
       field('Keyboard', seg(p.keyboard, [['auto', 'Shows when I type'], ['always', 'Always up'], ['never', 'Never']], (v) => this.set(() => { p.keyboard = v; }))),
       field('Typing speed', range(p.typingSpeed, (v) => this.set(() => { p.typingSpeed = v; }, 'cps'), { min: 4, max: 30, step: 1, fmt: (v) => v + ' letters/s' })),
       field('Reading time', range(p.pace, (v) => this.set(() => { p.pace = v; }, 'pace'), { min: 0.4, max: 2.5, step: 0.05, fmt: (v) => (v < 1 ? 'faster ' : v > 1 ? 'slower ' : '') + '×' + v.toFixed(2) })),
-      field('Emoji style', seg(p.emojiStyle, [['noto', 'Noto (Google)'], ['system', 'Windows']], (v) => this.set(() => { p.emojiStyle = v; })))));
+      field('Emoji style', seg(p.emojiStyle, [['noto', 'Noto (Google)'], ['system', IS_MAC ? 'Apple' : 'Windows']], (v) => this.set(() => { p.emojiStyle = v; })))));
     w.append(section('Video',
       toggle(p.captions, (v) => this.set(() => { p.captions = v; }), 'Captions for voice lines'),
       toggle(p.showTouches, (v) => this.set(() => { p.showTouches = v; }), 'Show finger taps (calls, swipes)')));

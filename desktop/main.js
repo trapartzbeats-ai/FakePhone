@@ -29,7 +29,7 @@ const log = (...a) => { try { fs.appendFileSync(LOG, `${new Date().toISOString()
 
 // ffmpeg muxes the exports: bundled in resources/ffmpeg when installed, the ffmpeg-static package from source
 function ffmpegPath() {
-  if (app.isPackaged) return path.join(process.resourcesPath, 'ffmpeg', 'ffmpeg.exe');
+  if (app.isPackaged) return path.join(process.resourcesPath, 'ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
   try { return createRequire(import.meta.url)('ffmpeg-static'); } catch { return null; }
 }
 

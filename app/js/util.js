@@ -1,4 +1,6 @@
 // Small shared helpers.
+export const IS_MAC = /Mac/.test(navigator.platform);
+export const MOD = IS_MAC ? '⌘' : 'Ctrl+';   // shortcut labels; the key handler takes Ctrl or Cmd
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const ease = (t) => { t = clamp(t, 0, 1); return 1 - Math.pow(1 - t, 3); };

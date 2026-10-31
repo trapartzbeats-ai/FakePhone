@@ -171,7 +171,8 @@ async function route(req, res) {
   }
 
   if (p === '/api/open-exports' && req.method === 'POST') {
-    spawn('explorer', [EXPORTS], { detached: true, stdio: 'ignore' }).unref();
+    const opener = { win32: 'explorer', darwin: 'open' }[process.platform] || 'xdg-open';
+    spawn(opener, [EXPORTS], { detached: true, stdio: 'ignore' }).unref();
     return send(res, 200, { ok: true });
   }
 
@@ -185,7 +186,7 @@ async function route(req, res) {
   fs.createReadStream(file).pipe(res);
 }
 
-// port 0 = any free port. ffmpeg = a bundled ffmpeg.exe, else the one on PATH.
+// port 0 = any free port. ffmpeg = a bundled ffmpeg, else the one on PATH.
 export function startServer({ port = 5190, exportsDir = path.join(ROOT, 'exports'), tmpDir, ffmpeg, onPickFolder } = {}) {
   EXPORTS = exportsDir;
   TMP = tmpDir || path.join(EXPORTS, '_tmp');

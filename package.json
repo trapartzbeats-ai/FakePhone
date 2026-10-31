@@ -11,7 +11,8 @@
     "start": "node server.js",
     "desktop": "electron .",
     "fonts": "node tools/fetch-fonts.mjs",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis --x64",
+    "dist:mac": "electron-builder --mac dmg"
   },
   "devDependencies": {
     "electron": "43.4.1",
@@ -38,6 +39,7 @@
         "from": "node_modules/ffmpeg-static",
         "to": "ffmpeg",
         "filter": [
+          "ffmpeg",
           "ffmpeg.exe",
           "*.LICENSE",
           "*.README",
@@ -56,6 +58,21 @@
         }
       ],
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.video",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Fake Phone records voice-overs and voice notes with your microphone."
+      }
+    },
+    "dmg": {
+      "artifactName": "FakePhone-${version}-mac-${arch}.dmg"
     },
     "nsis": {
       "oneClick": false,

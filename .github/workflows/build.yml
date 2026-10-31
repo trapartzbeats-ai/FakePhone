@@ -1,0 +1,98 @@
+# Builds the installers on GitHub's machines: Mac (Apple Silicon + Intel) and Windows. Each built app runs
+# tools/desktop-smoke.mjs on its own OS before it is kept. A tag like v0.1.0 also makes a release with the files.
+name: Build installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mac-arm64
+            os: macos-latest
+            target: --mac dmg --arm64
+            app: dist/mac-arm64/Fake Phone.app/Contents/MacOS/Fake Phone
+          - name: mac-x64
+            os: macos-15-intel
+            target: --mac dmg --x64
+            app: dist/mac/Fake Phone.app/Contents/MacOS/Fake Phone
+          - name: windows
+            os: windows-latest
+            target: --win nsis --x64
+            app: dist/win-unpacked/Fake Phone.exe
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # electron-builder fetches its own Electron for packaging; ffmpeg-static fetches this OS's ffmpeg
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Check the Mac signature (ad-hoc)
+        if: runner.os == 'macOS'
+        run: |
+          APP="$(dirname "$(dirname "$(dirname "${{ matrix.app }}")")")"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Signature|Identifier|Format"
+          file "$APP/Contents/Resources/ffmpeg/ffmpeg"
+      - name: Smoke test the built app
+        run: node tools/desktop-smoke.mjs "${{ matrix.app }}"
+        env:
+          FAKEPHONE_SMOKE_DIR: ${{ runner.temp }}/smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/smoke/window.png
+            ${{ runner.temp }}/smoke/data/desktop.log
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: out
+          merge-multiple: true
+      - name: Make the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          **Mac:** `FakePhone-…-mac-arm64.dmg` for Apple Silicon (M1 and newer), `…-mac-x64.dmg` for Intel Macs.
+          Open the .dmg, drag Fake Phone to Applications, open it. The first time macOS blocks it (the app is not
+          signed with an Apple Developer ID): System Settings > Privacy & Security > Open Anyway.
+
+          **Windows:** `FakePhone-Setup-….exe`. If SmartScreen says "Windows protected your PC": More info > Run anyway.
+          EOF
+          gh release create "${{ github.ref_name }}" out/* --repo "${{ github.repository }}" --title "Fake Phone ${{ github.ref_name }}" --notes-file notes.md
