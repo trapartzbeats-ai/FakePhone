@@ -44,6 +44,8 @@ jobs:
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      - name: Model checks (old projects open, script commands round-trip)
+        run: node tools/model-check.mjs
       - run: npx electron-builder ${{ matrix.target }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
