@@ -65,15 +65,23 @@ async function launch() {
   });
   const run = async (expr, secs) => {
     const r = await send('Runtime.evaluate', { expression: `(async () => { ${expr} })()`, awaitPromise: true, returnByValue: true }, secs);
+    if (r.error) throw new Error(r.error.message);
     if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'page error');
     return r.result?.result?.value;
   };
   // Browser.close never answers (the socket drops), so do not wait on it
   const close = async () => { send('Browser.close', {}, 5).catch(() => {}); await exited(proc); };
   await send('Runtime.enable');
-  // slow machines (the Intel Mac runner) can take well over 10 s to start the editor
-  const ready = await run(`for (let i = 0; i < 300 && !(window.fakePhone && window.fakePhone.tl); i++) await new Promise((r) => setTimeout(r, 100));
-    return window.fakePhone && window.fakePhone.tl ? 'ok' : (document.querySelector('.boot-error')?.textContent || 'not started after 30 s');`, 45);
+  // The target is listed with its new URL before the page commits, so the first questions can reach the blank
+  // page being replaced (context destroyed / no answer): ask again until the editor answers. Slow machines (the
+  // Intel Mac runner) take well over 10 s to start it.
+  let ready = 'not started after 60 s';
+  for (const t0 = Date.now(); Date.now() - t0 < 60000; await sleep(500)) {
+    try {
+      ready = await run(`return window.fakePhone && window.fakePhone.tl ? 'ok' : (document.querySelector('.boot-error')?.textContent || 'starting');`, 10);
+      if (ready === 'ok' || (ready && ready !== 'starting')) break;
+    } catch (e) { ready = e.message; }
+  }
   if (ready !== 'ok') { await close(); throw new Error('the editor did not start: ' + ready); }
   return { send, run, errors: () => errors.filter((e) => !harness(e)), close };
 }
