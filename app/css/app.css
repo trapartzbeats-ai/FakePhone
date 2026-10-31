@@ -215,12 +215,21 @@ a { color: var(--lime); }
 .call-lines { display: flex; flex-direction: column; gap: 10px; }
 .call-line { display: flex; flex-direction: column; gap: 6px; border-left: 2px solid #2f7a40; padding-left: 8px; }
 .thumb-lg { max-width: 120px; max-height: 90px; border-radius: 8px; }
+.thumb-wrap { display: inline-flex; }
+.app-thumb { border-radius: 9px; flex: none; background: #222; }
 
 .people { display: flex; flex-direction: column; gap: 10px; }
 .person { background: #0e0e11; border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .avatar-btn { width: 46px; height: 46px; border-radius: 50%; border: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 70%, white), var(--c)); background-size: cover; background-position: center; color: #fff; font-weight: 700; font-size: 18px; flex: none; }
 .name-input { font-weight: 600; margin-bottom: 6px; }
 .small-input { max-width: 110px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 12px 8px; }
+.photo-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+.photo-tile .avatar-btn { width: 56px; height: 56px; font-size: 22px; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color .15s; cursor: pointer; }
+.photo-tile .avatar-btn:hover { outline-color: var(--lime); }
+.photo-tile .ptl { font-size: 11px; color: var(--sub, #9a9aa3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-tile .ptx { position: absolute; top: -4px; right: calc(50% - 36px); width: 18px; height: 18px; border-radius: 50%; border: 0; background: #2a2a31; color: #ddd; font-size: 10px; line-height: 18px; padding: 0; cursor: pointer; }
+.photo-tile .ptx:hover { background: #c33; color: #fff; }
 .inbox-rows { display: flex; flex-direction: column; gap: 8px; }
 .inbox-row { display: flex; flex-direction: column; gap: 6px; background: #0e0e11; border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
 .voice-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--line); border-radius: 9px; }

@@ -18,10 +18,10 @@
 <div id="info"></div>
 <div class="grid" id="grid"></div>
 <script type="module">
-import { demoProject, migrate } from '../js/model.js';
+import { demoProject, migrate, parseScript } from '../js/model.js';
 import { compile } from '../js/timeline.js';
 import { renderFrame } from '../js/render/renderer.js';
-import { onMediaChange } from '../js/media.js';
+import { onMediaChange, ensureVideos, primeVideos, setVideoExport } from '../js/media.js';
 
 const q = new URLSearchParams(location.search);
 let p = migrate(demoProject());
@@ -30,6 +30,7 @@ if (q.get('project')) {
   const id = q.get('project') === 'last' ? loadSettings().lastProject : q.get('project');
   p = migrate(await getProject(id));
 }
+if (q.get('script')) p.events = parseScript(q.get('script'), p);   // e.g. script=[notify Jess: hi {facebook}]
 if (q.get('big')) document.body.classList.add('big');
 for (const k of ['theme', 'device', 'layout', 'keyboard', 'startScreen', 'emojiStyle']) if (q.get(k)) p[k] = q.get(k);
 if (q.get('dark')) p.dark = q.get('dark') === '1';
@@ -52,11 +53,14 @@ const cans = times.map((t) => {
   grid.append(f);
   return [c, t];
 });
-const draw = () => cans.forEach(([c, t]) => {
-  try { renderFrame(c.getContext('2d'), p, tl, t); }
+// videos: load them and seek each frame's video to its exact time first (the same way the exporter does)
+await ensureVideos(tl.items.filter((i) => i.kind === 'video'));
+setVideoExport(true);
+const draw = async () => { for (const [c, t] of cans) {
+  try { await primeVideos(tl, t); renderFrame(c.getContext('2d'), p, tl, t); }
   catch (e) { console.error(e); document.getElementById('info').textContent += ' ERROR: ' + e.message; }
-});
-draw();
+} };
+await draw();
 onMediaChange(draw);
 window.__sheet = { p, tl, draw };
 
@@ -68,7 +72,7 @@ if (q.get('save')) {
   const g = out.getContext('2d');
   g.fillStyle = '#111'; g.fillRect(0, 0, out.width, out.height);
   await new Promise((r) => setTimeout(r, 400));
-  draw();
+  await draw();
   cans.forEach(([c], i) => g.drawImage(c, (i % cols) * tw, Math.floor(i / cols) * th, tw, th));
   const blob = await out.convertToBlob({ type: 'image/png' });
   const r = await fetch('/api/dev/save?name=' + encodeURIComponent(q.get('save')), { method: 'POST', body: blob });

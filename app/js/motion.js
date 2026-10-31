@@ -24,6 +24,7 @@ export const MOTION_KEYS = {
   banner: { label: 'Notification drop', dur: 0.55, ease: 'spring.snappy' },
   lockNote: { label: 'Lock screen notification', dur: 0.5, ease: 'spring.gentle' },
   reaction: { label: 'Reaction pop', dur: 0.38, ease: 'easeOutBack' },
+  appOpen: { label: 'Open / close an app', dur: 0.5, ease: 'easeOutCubic' },
   swipe: { label: 'Swipe to delete (whole gesture)', dur: 1.7, ease: 'easeOutCubic' },
   call: { label: 'Call screen fade', dur: 0.35, ease: 'easeOutCubic' },
   camera: { label: 'Camera zoom / reset', dur: 0.7, ease: 'easeInOutCubic' },

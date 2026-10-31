@@ -1,8 +1,11 @@
 // Side panel tabs: the selected event's inspector, Look, People, Voices & keys, Sound, Motion, Export.
 import { h, field, row, section, text, area, num, range, select, toggle, seg, color, btn, pickFile, toast, closePopover } from './ui.js';
 import { THEMES, DEVICES } from './themes.js';
-import { EVENT_TYPES, REACTIONS, SCREENS, CONTACT_COLORS, BUBBLE_FX, SCREEN_FX, CAMERA_FX, CAMERA_MOVES, CAMERA_TARGETS, nameOf, chatTitle, voiceIdOf } from './model.js';
+import { EVENT_TYPES, REACTIONS, SCREENS, CONTACT_COLORS, ensureThemeApp, defaultHome, newHomeApp, BUBBLE_FX, SCREEN_FX, CAMERA_FX, CAMERA_MOVES, CAMERA_TARGETS, nameOf, chatTitle, voiceIdOf } from './model.js';
 import { addMediaBlob, mediaURL } from './media.js';
+import { getMedia } from './store.js';
+import { drawApp } from './render/appicons.js';
+import { APP_CHOICES, APP_NAMES, themeApp } from './apps.js';
 import { SOUND_SLOTS, FX_SOUNDS, peaksOf } from './audio.js';
 import { ELEVEN_MODELS, listVoices, tts, ttsKey, usesStyle, MicRecorder, trimTake } from './voice.js';
 import { MOTION_KEYS, EASE_NAMES, SPRINGS, curve } from './motion.js';
@@ -27,7 +30,7 @@ export class Panels {
     document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === this.tab));
     const scroll = this.body.scrollTop;
     this.body.textContent = '';
-    const fn = { edit: this.edit, look: this.look, people: this.people, voices: this.voices, sound: this.sound, motion: this.motion, export: this.exportTab }[this.tab];
+    const fn = { edit: this.edit, look: this.look, people: this.people, home: this.homeTab, voices: this.voices, sound: this.sound, motion: this.motion, export: this.exportTab }[this.tab];
     this.body.append(fn.call(this));
     if (!tab || tab === this.tab) this.body.scrollTop = scroll;
   }
@@ -132,13 +135,25 @@ export class Panels {
     return box;
   }
 
-  mediaThumb(id, onPick, onClear, label = 'Choose image') {
-    const img = h('img', { class: 'thumb-lg' });
-    if (id) mediaURL(id).then((u) => { img.src = u; });
-    return row(id ? img : null, btn(id ? 'Replace' : label, async () => {
-      const [f] = await pickFile('image/*');
-      if (f) onPick((await addMediaBlob(f, f.name)).id);
+  mediaThumb(id, onPick, onClear, label = 'Choose image', accept = 'image/*') {
+    const box = h('span', { class: 'thumb-wrap' });
+    if (id) getMedia(id).then((rec) => {
+      if (!rec) return;
+      const u = URL.createObjectURL(rec.blob);
+      box.append(rec.kind === 'video' ? h('video', { class: 'thumb-lg', src: u, muted: true, preload: 'metadata' }) : h('img', { class: 'thumb-lg', src: u }));
+    });
+    return row(id ? box : null, btn(id ? 'Replace' : label, async () => {
+      const [f] = await pickFile(accept);
+      if (!f) return;
+      try { const rec = await addMediaBlob(f, f.name); onPick(rec.id, rec); } catch (err) { toast(err.message, 'error'); }
     }, 'small'), id && onClear ? btn('Remove', onClear, 'ghost small') : null);
+  }
+
+  // A small live preview of an app icon (drawn with the same code as the phone screen).
+  appThumb(spec, size = 40) {
+    const cv = h('canvas', { class: 'app-thumb', width: size * 2, height: size * 2, style: { width: size + 'px', height: size + 'px' } });
+    drawApp(cv.getContext('2d'), spec, 0, 0, size * 2, this.p);
+    return cv;
   }
 
   // ---- Edit (selected event) ----------------------------------------------------------
@@ -176,7 +191,11 @@ export class Panels {
           field('Kind', seg(e.vn ? 'vn' : 'text', [['text', 'Text / image'], ['vn', '🎤 Voice note']], (v) => this.set(() => { e.vn = v === 'vn'; }, null, re))),
           field(e.vn ? 'What the voice note says (for the AI voice and captions)' : 'Text', h('div', { class: 'with-emoji' }, area(e.text, (v) => this.set(() => { e.text = v; }, k('text')), { placeholder: e.vn ? 'Say something…' : e.mediaId ? 'Caption (optional)' : 'Message text' }),
             h('button', { class: 'icon-btn', title: 'Emoji', onclick: (x) => this.ed.emojiPicker(x.currentTarget, (em) => this.ed.insertText(em)) }, '😀'))),
-          e.vn ? null : field('Image / GIF', this.mediaThumb(e.mediaId, (id) => this.set(() => { e.mediaId = id; }, null, re), () => this.set(() => { e.mediaId = null; }, null, re), 'Add image')),
+          e.vn ? null : field('Image / GIF / video', this.mediaThumb(e.mediaId,
+            (id, rec) => this.set(() => { e.mediaId = id; e.mediaKind = rec?.kind === 'video' ? 'video' : 'image'; e.mediaDur = rec?.dur || 0; }, null, re),
+            () => this.set(() => { e.mediaId = null; e.mediaKind = 'image'; e.mediaDur = 0; }, null, re), 'Add image or video', 'image/*,video/*')),
+          !e.vn && e.mediaId && e.mediaKind === 'video' ? field('How the video plays', seg(e.vmode || 'full', [['full', 'Tap, then full screen'], ['inline', 'Plays in the bubble']], (v) => this.set(() => { e.vmode = v; }, null, re))) : null,
+          !e.vn && e.mediaId && e.mediaKind === 'video' ? h('p', { class: 'hint' }, `Video length ${(e.mediaDur || 0).toFixed(1)}s. Its sound plays with it, and background music dips under it. The story waits for it to finish.`) : null,
           field('Already on screen when the video starts', toggle(e.pre, (v) => this.set(() => { e.pre = v; }, null, re))));
         if (!e.pre) {
           if (e.vn) {
@@ -238,17 +257,37 @@ export class Panels {
       case 'unsend':
         S(null, field('Which message', select(e.target || '', msgTargets('me'), (v) => this.set(() => { e.target = v || null; }))));
         break;
-      case 'notify':
+      case 'notify': {
+        const custom = e.app === 'custom';
+        const spec = custom ? { app: 'custom', name: e.appName || e.title, color: e.appColor, iconId: e.iconId } : e.app === 'auto' ? themeApp(this.p.theme) : e.app;
         S(null,
           field('From', select(e.from, this.whoOptions(false), (v) => this.set(() => { e.from = v; }))),
+          field('App it comes from', row(this.appThumb(spec), select(e.app || 'auto', APP_CHOICES, (v) => this.set(() => { e.app = v; }, null, { inspector: true })))),
+          custom ? row(
+            field('App name', text(e.appName, (v) => this.set(() => { e.appName = v; }, k('an')), { placeholder: 'Facebook' })),
+            field('Colour', color(e.appColor || '#5B5BD6', (v) => this.set(() => { e.appColor = v; }, k('ac'))))) : null,
+          custom ? field('App icon', this.mediaThumb(e.iconId, (id) => this.set(() => { e.iconId = id; }, null, { inspector: true }), () => this.set(() => { e.iconId = null; }, null, { inspector: true }), 'Upload icon')) : null,
+          field('Title (bold line)', text(e.title, (v) => this.set(() => { e.title = v; }, k('ti')), { placeholder: nameOf(this.p, e.from) })),
           field('Text', area(e.text, (v) => this.set(() => { e.text = v; }, k('t')))),
+          field('Show their profile photo', toggle(e.photo, (v) => this.set(() => { e.photo = v; }, null, { inspector: true }))),
+          field('Attached picture', this.mediaThumb(e.imageId, (id) => this.set(() => { e.imageId = id; }, null, { inspector: true }), () => this.set(() => { e.imageId = null; }, null, { inspector: true }), 'Add picture')),
+          field('Red badge on its home-screen icon', toggle(e.badge !== false, (v) => this.set(() => { e.badge = v; }))),
           field('Banner stays (seconds)', num(e.dur, (v) => this.set(() => { e.dur = v ?? 3.5; }, k('d')), { min: 0.5 })),
           field('Story continues after (seconds)', num(e.wait, (v) => this.set(() => { e.wait = v ?? 1.6; }, k('w')), { min: 0 })),
-          h('p', { class: 'hint' }, 'On the lock screen it lands in the notification list instead.'));
+          h('p', { class: 'hint' }, 'Pick Facebook, Snapchat, Cash App... or upload your own icon for any other app. On the lock screen it lands in the notification list instead. In a script: [notify Jess: tagged you in a photo {facebook}]'));
         break;
+      }
       case 'screen':
         S(null, field('Go to', seg(e.to, Object.entries(SCREENS), (v) => this.set(() => { e.to = v; }))));
         break;
+      case 'openapp': {
+        const apps = [...this.p.home.apps, ...this.p.home.dock];
+        S(null,
+          field('Tap which app', select(e.app || 'auto', [['auto', `The chat app (${APP_NAMES[themeApp(this.p.theme)]})`], ...apps.map((a) => [a.id, a.name])], (v) => this.set(() => { e.app = v; }))),
+          field('It opens to', seg(e.to, [['chat', 'The chat'], ['inbox', 'Messages list']], (v) => this.set(() => { e.to = v; }))),
+          h('p', { class: 'hint' }, 'Goes to the home screen first if it is not there, taps the icon, and the app grows out of it. Change the icons in the Home tab. In a script: [home] then [open chat].'));
+        break;
+      }
       case 'swipe':
         S(null,
           field('Conversation to delete', select(e.row, [['chat', `${chatTitle(this.p)} (this chat)`], ...this.p.inbox.map((r) => [r.id, r.name])], (v) => this.set(() => { e.row = v; }))),
@@ -319,7 +358,7 @@ export class Panels {
     const w = h('div', { class: 'tab-pad' });
     const re = { inspector: true };
     const themeCards = h('div', { class: 'theme-cards' }, Object.entries(THEMES).map(([id, t]) =>
-      h('button', { class: 'theme-card ' + id + (p.theme === id ? ' on' : ''), onclick: () => this.set(() => { p.theme = id; }, null, re) },
+      h('button', { class: 'theme-card ' + id + (p.theme === id ? ' on' : ''), onclick: () => this.set(() => { p.theme = id; ensureThemeApp(p); }, null, re) },
         h('span', { class: 'sw' }, h('i', { class: 'a' }), h('i', { class: 'b' })), t.label)));
     w.append(section('App', themeCards,
       row(toggle(p.dark, (v) => this.set(() => { p.dark = v; }), 'Dark mode'), toggle(p.receipts, (v) => this.set(() => { p.receipts = v; }), 'Delivered / Read'))));
@@ -361,6 +400,13 @@ export class Panels {
     const p = this.p;
     const re = { inspector: true };
     const w = h('div', { class: 'tab-pad' });
+    const tiles = h('div', { class: 'photo-grid' },
+      this.photoTile('You', p.me, p.me.name),
+      ...p.contacts.map((c) => this.photoTile(c.name, c)),
+      p.chat.members.length > 1 ? this.photoTile('Group photo', p.chat, chatTitle(p)) : null,
+      ...p.inbox.map((r) => this.photoTile(r.name, r)));
+    w.append(section('Profile pictures', tiles,
+      h('p', { class: 'hint' }, 'Click a circle to choose a photo for it. They show everywhere: chat, messages list, calls, notifications. The group photo is used in group chats.')));
     w.append(section('You',
       row(this.avatarBtn(p.me), field('Your name', text(p.me.name, (v) => this.set(() => { p.me.name = v; }, 'me.name')))),
       field('Your voice', this.voiceSelect(p.me.voiceId, (v) => this.set(() => { p.me.voiceId = v; }, null, re)))));
@@ -389,7 +435,7 @@ export class Panels {
     w.append(section('Narrator', field('Voice-over voice', this.voiceSelect(p.narrator.voiceId, (v) => this.set(() => { p.narrator.voiceId = v; }, null, re)))));
     const inbox = h('div', { class: 'inbox-rows' });
     p.inbox.forEach((r, i) => inbox.append(h('div', { class: 'inbox-row' },
-      row(color(r.color || '#8E8E93', (v) => this.set(() => { r.color = v; }, r.id + 'c')), text(r.name, (v) => this.set(() => { r.name = v; }, r.id + 'n'), { class: 'grow' }), text(r.time, (v) => this.set(() => { r.time = v; }, r.id + 't'), { class: 'small-input' }),
+      row(this.avatarBtn(r), color(r.color || '#8E8E93', (v) => this.set(() => { r.color = v; }, r.id + 'c')), text(r.name, (v) => this.set(() => { r.name = v; }, r.id + 'n'), { class: 'grow' }), text(r.time, (v) => this.set(() => { r.time = v; }, r.id + 't'), { class: 'small-input' }),
         h('button', { class: 'icon-btn', onclick: () => this.set(() => { p.inbox.splice(i, 1); }, null, re) }, '✕')),
       text(r.preview, (v) => this.set(() => { r.preview = v; }, r.id + 'p'), { placeholder: 'Last message' }),
       toggle(r.unread, (v) => this.set(() => { r.unread = v; }), 'Unread'))));
@@ -398,8 +444,51 @@ export class Panels {
     return w;
   }
 
-  avatarBtn(c) {
-    const b = h('button', { class: 'avatar-btn', title: 'Click to set a photo, right-click to remove', style: { '--c': c.color || '#8E8E93' } }, (c.name || '?').slice(0, 1).toUpperCase());
+  // ---- Home screen ------------------------------------------------------------------
+  homeTab() {
+    const p = this.p;
+    const home = p.home;
+    const re = { inspector: true };
+    const w = h('div', { class: 'tab-pad' });
+    w.append(section('Wallpaper',
+      field('Same as the lock screen', toggle(!home.wallpaper, (v) => this.set(() => { home.wallpaper = v ? null : structuredClone(p.wallpaper); }, null, re))),
+      home.wallpaper ? this.backdrop('Home wallpaper', home.wallpaper, false) : null,
+      field('Show app names', toggle(home.labels !== false, (v) => this.set(() => { home.labels = v; })))));
+
+    const presets = [...Object.entries(APP_NAMES), ['custom', 'Custom icon…']];
+    const card = (a, list, i, inDock) => {
+      const move = (d) => this.set(() => { const j = i + d; if (j >= 0 && j < list.length) [list[i], list[j]] = [list[j], list[i]]; }, null, re);
+      return h('div', { class: 'inbox-row home-app' },
+        row(this.appThumb(a, 38), text(a.name, (v) => this.set(() => { a.name = v; }, a.id + 'n'), { class: 'grow' }),
+          h('button', { class: 'icon-btn', title: 'Move earlier', onclick: () => move(-1) }, '↑'),
+          h('button', { class: 'icon-btn', title: 'Move later', onclick: () => move(1) }, '↓'),
+          h('button', { class: 'icon-btn', title: 'Remove', onclick: () => this.set(() => { list.splice(i, 1); }, null, re) }, '✕')),
+        row(field('Icon', select(a.app, presets, (v) => this.set(() => {
+            if (!a.name || a.name === APP_NAMES[a.app]) a.name = APP_NAMES[v] || a.name;
+            a.app = v;
+          }, null, re))),
+          field('Red badge', num(a.badge || 0, (v) => this.set(() => { a.badge = v ?? 0; }, a.id + 'b'), { min: 0, max: 99 }))),
+        a.app === 'custom' ? row(color(a.color || '#5B5BD6', (v) => this.set(() => { a.color = v; }, a.id + 'c')),
+          this.mediaThumb(a.iconId, (id) => this.set(() => { a.iconId = id; }, null, re), () => this.set(() => { a.iconId = null; }, null, re), 'Upload icon')) : null,
+        field('In the dock', toggle(inDock, (v) => {
+          if (v && home.dock.length >= 4) { toast('The dock holds 4 apps'); this.render(); return; }
+          this.set(() => { list.splice(i, 1); (v ? home.dock : home.apps).push(a); }, null, re);
+        })));
+    };
+    w.append(section(`Dock (${home.dock.length}/4)`, h('div', { class: 'inbox-rows' }, home.dock.map((a, i) => card(a, home.dock, i, true)))));
+    w.append(section(`Apps (${home.apps.length})`, h('div', { class: 'inbox-rows' }, home.apps.map((a, i) => card(a, home.apps, i, false))),
+      row(btn('+ Add app', () => this.set(() => {
+          const used = new Set([...home.apps, ...home.dock].map((a) => a.app));
+          home.apps.push(newHomeApp(Object.keys(APP_NAMES).find((k) => !used.has(k)) || 'custom', {}));
+        }, null, re), 'ghost small'),
+        btn('Reset home screen', () => { if (confirm('Put the default apps back?')) this.set(() => { p.home = defaultHome(); ensureThemeApp(p); }, null, re); }, 'ghost small')),
+      home.apps.length > 24 ? h('p', { class: 'hint' }, 'Only the first 24 apps fit on the screen.') : null,
+      h('p', { class: 'hint' }, 'Use "Change screen" > Home screen, or "Open an app", in the script. Notifications add a red badge to the icon of the app they come from (turn it off per notification).')));
+    return w;
+  }
+
+  avatarBtn(c, initialOf = c.name) {
+    const b = h('button', { class: 'avatar-btn', title: 'Click to choose a photo', style: { '--c': c.color || '#8E8E93' } }, (initialOf || '?').slice(0, 1).toUpperCase());
     if (c.avatar) mediaURL(c.avatar).then((u) => { b.style.backgroundImage = `url(${u})`; b.textContent = ''; });
     b.onclick = async () => {
       const [f] = await pickFile('image/*');
@@ -407,6 +496,14 @@ export class Panels {
     };
     b.oncontextmenu = (e) => { e.preventDefault(); this.set(() => { c.avatar = null; }, null, { inspector: true }); };
     return b;
+  }
+
+  // One tile per profile picture: click the circle to choose a photo, the x removes it.
+  photoTile(label, holder, initialOf) {
+    return h('div', { class: 'photo-tile' },
+      this.avatarBtn(holder, initialOf),
+      h('span', { class: 'ptl', title: label }, label),
+      holder.avatar ? h('button', { class: 'ptx', title: 'Remove this photo', onclick: () => this.set(() => { holder.avatar = null; }, null, { inspector: true }) }, '✕') : null);
   }
 
   // ---- Voices & keys -------------------------------------------------------------------

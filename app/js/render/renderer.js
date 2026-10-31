@@ -5,6 +5,9 @@ import { screenAt, callAt } from '../timeline.js';
 import { lin, val } from '../motion.js';
 import { STYLE, drawChat } from './chat.js';
 import { drawInbox, drawLock, drawBanners, drawCall } from './screens.js';
+import { drawHome, homeIconRect } from './home.js';
+import { drawApp } from './appicons.js';
+import { drawVideoPlayer } from './player.js';
 import { drawScreenFx } from './effects.js';
 import { cameraAt } from './camera.js';
 import { statusBar, homeIndicator, fillBackdrop, rr, wrap, fillRR } from './draw.js';
@@ -69,6 +72,7 @@ export function renderFrame(ctx, p, tl, t) {
 function drawOne(ctx, R, name, t) {
   if (name === 'inbox') drawInbox(ctx, R, t);
   else if (name === 'lock') drawLock(ctx, R, t);
+  else if (name === 'home') drawHome(ctx, R, t);
   else drawChat(ctx, R, t);
 }
 
@@ -77,7 +81,29 @@ function drawScreen(ctx, R, t) {
   const sc = screenAt(tl, t);
   let top = sc.to;
   if (sc.t < 0 || sc.k >= 1) drawOne(ctx, R, sc.to, t);
-  else {
+  else if (sc.kind === 'app') {
+    // an app grows out of its home-screen icon (or shrinks back into it)
+    const opening = sc.to !== 'home';
+    const k = opening ? tl.mo.appOpen.f(sc.k) : 1 - tl.mo.appOpen.f(sc.k);      // 0 = the icon, 1 = the whole screen
+    const appScreen = opening ? sc.to : sc.from;
+    const r = homeIconRect(R, sc.app);
+    ctx.save();
+    ctx.translate(W / 2, H / 2); ctx.scale(lerp(1, 1.18, k), lerp(1, 1.18, k)); ctx.translate(-W / 2, -H / 2);
+    drawHome(ctx, R, t);
+    ctx.restore();
+    shadeRect(ctx, W, H, 0.3 * k);
+    const X = lerp(r.x, 0, k), Y = lerp(r.y, 0, k), w = lerp(r.s, W, k), h = lerp(r.s, H, k);
+    const rad = lerp(r.round ? r.s / 2 : r.s * 0.225, dev.radius, k);
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(X, Y, w, h, rad); ctx.clip();
+    if (r.found) drawApp(ctx, R.p.home.apps.concat(R.p.home.dock).find((a) => a.id === sc.app), X, Y + (h - w) / 2, w, R.p, { round: false });
+    ctx.globalAlpha = clamp((k - 0.12) / 0.5, 0, 1);
+    const cs = w / W;
+    ctx.translate(X, Y + (h - H * cs) / 2); ctx.scale(cs, cs);
+    drawOne(ctx, R, appScreen, t);
+    ctx.restore();
+    top = k > 0.5 ? appScreen : 'home';
+  } else {
     const e = tl.mo.screen.f(sc.k);
     const { from, to } = sc;
     if (to === 'lock') {
@@ -114,6 +140,7 @@ function drawScreen(ctx, R, t) {
   }
 
   if (sc.to === 'chat') drawScreenFx(ctx, R, t);
+  const playerK = sc.to === 'chat' ? drawVideoPlayer(ctx, R, t) : 0;
 
   // call overlay
   const c = callAt(tl, t);
@@ -135,11 +162,11 @@ function drawScreen(ctx, R, t) {
 
   // status bar + home indicator
   let light;
-  if (callA > 0.5 || top === 'lock') light = true;
+  if (callA > 0.5 || top === 'lock' || top === 'home' || playerK > 0.5) light = true;
   else if (top === 'chat') light = pal.dark || (R.fam === 'whatsapp' && pal.os === 'android');
   else light = pal.dark || (R.fam === 'whatsapp' && pal.os === 'android');
   statusBar(ctx, R.p, W, light ? '#FFFFFF' : '#000000', dev);
-  const homeLight = callA > 0.5 || top === 'lock' || pal.dark;
+  const homeLight = callA > 0.5 || top === 'lock' || top === 'home' || playerK > 0.5 || pal.dark;
   homeIndicator(ctx, W, H, homeLight ? '#FFFFFF' : '#000000', dev.os);
 }
 

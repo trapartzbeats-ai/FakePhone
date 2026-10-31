@@ -1,5 +1,6 @@
 // Project data: defaults, event factory, the demo, and the quick-script parser.
 import { uid } from './util.js';
+import { APP_NAMES, themeApp } from './apps.js';
 
 export const CONTACT_COLORS = ['#FF9500', '#5856D6', '#FF2D55', '#34C759', '#AF52DE', '#32ADE6', '#FF3B30', '#A2845E'];
 
@@ -13,6 +14,7 @@ export const EVENT_TYPES = {
   unsend: { label: 'Unsend message', icon: '↩' },
   notify: { label: 'Notification banner', icon: '🔔' },
   screen: { label: 'Change screen', icon: '📱' },
+  openapp: { label: 'Open an app (home screen)', icon: '👆' },
   swipe: { label: 'Swipe to delete chat', icon: '🗑' },
   call: { label: 'Phone call', icon: '📞' },
   voiceover: { label: 'Voice-over', icon: '🎙' },
@@ -22,7 +24,7 @@ export const EVENT_TYPES = {
 
 export const REACTIONS = { heart: '❤️', like: '👍', dislike: '👎', haha: '😂', '!!': '‼️', '?': '❓' };
 
-export const SCREENS = { chat: 'Chat', inbox: 'Messages list', lock: 'Lock screen' };
+export const SCREENS = { chat: 'Chat', inbox: 'Messages list', lock: 'Lock screen', home: 'Home screen' };
 
 // iMessage-style send effects. dur = how long the effect plays (the story waits for it).
 export const BUBBLE_FX = { slam: { label: 'Slam', dur: 0.9 }, loud: { label: 'Loud', dur: 1.3 }, gentle: { label: 'Gentle', dur: 1.7 }, ink: { label: 'Invisible Ink', dur: 2.4 } };
@@ -38,15 +40,16 @@ export const CAMERA_TARGETS = { last: 'Last message', composer: 'Typing box', he
 export function newEvent(type, init = {}, project = null) {
   const them = project ? project.chat.members[0] : 'c1';
   const base = {
-    msg: { from: 'me', text: '', mediaId: null, typing: 'auto', typingDur: null, hold: null, pre: false, voice: null, draft: '', draftPause: null, vn: false, vnMode: 'record', effect: null, screenFx: null, cam: 'none', camZoom: 1.8 },
+    msg: { from: 'me', text: '', mediaId: null, mediaKind: 'image', mediaDur: 0, vmode: 'full', typing: 'auto', typingDur: null, hold: null, pre: false, voice: null, draft: '', draftPause: null, vn: false, vnMode: 'record', effect: null, screenFx: null, cam: 'none', camZoom: 1.8 },
     typing: { from: them, dur: 2 },
     pause: { dur: 1 },
     stamp: { text: 'Today 9:41 AM', pre: false },
     react: { target: null, from: 'me', emoji: '❤️' },
     read: { text: '' },
     unsend: { target: null },
-    notify: { from: them, text: '', dur: 3.5, wait: 1.6 },
+    notify: { from: them, text: '', dur: 3.5, wait: 1.6, app: 'auto', appName: '', appColor: '#5B5BD6', iconId: null, title: '', photo: false, imageId: null, badge: true },
     screen: { to: 'inbox' },
+    openapp: { app: 'auto', to: 'chat' },
     swipe: { row: null },
     call: { direction: 'in', with: them, outcome: 'answer', ring: 4, talk: 3, lines: [] },
     voiceover: { text: '', voice: null, overlap: false },
@@ -54,6 +57,28 @@ export function newEvent(type, init = {}, project = null) {
     camera: { move: 'zoom', target: 'last', zoom: 1.8, dur: null, amount: 1, wait: 0.2 },
   }[type];
   return { id: uid('e'), type, ...structuredClone(base), ...init };
+}
+
+// The home screen: app icons on the grid and in the dock. app = a preset id (see apps.js) or 'custom'
+// (name + colour + uploaded icon). badge = the red number on the icon.
+const homeApp = (app, extra = {}) => ({ id: uid('a'), app, name: APP_NAMES[app] || 'App', badge: 0, color: '#5B5BD6', iconId: null, ...extra });
+export function defaultHome() {
+  return {
+    apps: ['calendar', 'photos', 'camera', 'mail', 'clock', 'maps', 'weather', 'notes', 'settings', 'appstore', 'youtube', 'spotify',
+      'facebook', 'instagram', 'whatsapp', 'snapchat', 'tiktok', 'x', 'telegram', 'netflix'].map((k) => homeApp(k)),
+    dock: ['phone', 'safari', 'imessage', 'music'].map((k) => homeApp(k)),
+    wallpaper: null,          // null = the lock screen wallpaper
+    labels: true,
+  };
+}
+export const newHomeApp = homeApp;
+// The look's chat app has to be on the home screen so "open the app" has an icon to tap.
+export function ensureThemeApp(p) {
+  const key = themeApp(p.theme);
+  const all = [...p.home.apps, ...p.home.dock];
+  if (all.some((a) => a.app === key)) return;
+  const slot = p.home.dock.find((a) => a.app === 'imessage' || a.app === 'android');
+  if (slot) { slot.app = key; slot.name = APP_NAMES[key]; } else p.home.apps.push(homeApp(key));
 }
 
 export function newProject(name = 'Untitled chat') {
@@ -69,10 +94,11 @@ export function newProject(name = 'Untitled chat') {
     layout: 'phone',
     background: { type: 'gradient', color: '#0d0d12', color2: '#2b2140', mediaId: null },
     wallpaper: { type: 'gradient', color: '#1b2a6b', color2: '#e7a2c9', mediaId: null },
+    home: defaultHome(),
     status: { time: '9:41', battery: 82, signal: 4, wifi: true, date: 'Friday, October 31' },
     me: { name: 'Me', voiceId: '', voiceName: '' },
     contacts: [{ id: 'c1', name: 'Anthony S.', color: '#FF9500', avatar: null, voiceId: '', voiceName: '', label: 'mobile' }],
-    chat: { members: ['c1'], name: '' },
+    chat: { members: ['c1'], name: '', avatar: null },
     narrator: { voiceId: '', voiceName: '' },
     keyboard: 'auto',
     typingSpeed: 11,
@@ -109,6 +135,7 @@ export function migrate(p) {
     for (const k of Object.keys(base)) if (e[k] === undefined) e[k] = base[k];
   }
   if (!p.chat.members.length && p.contacts.length) p.chat.members = [p.contacts[0].id];
+  ensureThemeApp(p);
   return p;
 }
 
@@ -174,11 +201,15 @@ Anthony: Yes! Just follow the link above
 [react heart]
 [time Today 9:41 AM]
 [notify Mom: did you book it??]
+[notify Jess: tagged you in a photo {facebook}]
 Anthony: 🎤 call me when you see this
 me: ~~I love you~~ ok bet
 [call in Anthony answer]
 > Anthony: Hey, you there?
 > me: yeah what's up
+[lock]
+[home]
+[open chat]
 [inbox]
 [delete Spam Likely]
 [chat]
@@ -237,8 +268,12 @@ export function parseScript(text, p) {
       else if (name === 'react') events.push(ev('react', { emoji: REACTIONS[arg.toLowerCase()] || arg || '❤️' }));
       else if (name === 'unsend') events.push(ev('unsend', {}));
       else if (name === 'notify') {
-        const m = arg.match(/^([^:]{1,40}):\s*(.*)$/);
-        events.push(ev('notify', m ? { from: resolve(m[1]), text: m[2] } : { text: arg }));
+        // a trailing {facebook} / {snapchat} / ... tag picks the app the notification comes from
+        let body = arg, app;
+        const tag = body.match(/\s*\{(\w+)\}\s*$/);
+        if (tag && APP_NAMES[tag[1].toLowerCase()]) { app = tag[1].toLowerCase(); body = body.slice(0, tag.index); }
+        const m = body.match(/^([^:]{1,40}):\s*(.*)$/);
+        events.push(ev('notify', { ...(m ? { from: resolve(m[1]), text: m[2] } : { text: body }), ...(app ? { app } : {}) }));
       } else if (name === 'call') {
         const parts = arg.split(/\s+/);
         const dir = /^out/i.test(parts[0]) ? 'out' : 'in';
@@ -246,8 +281,9 @@ export function parseScript(text, p) {
         const who = parts.filter((w, i) => !(i === 0 && /^(in|out|incoming|outgoing)$/i.test(w)) && !/^(answer|answered|decline|declined|missed|[\d.]+)$/i.test(w)).join(' ');
         lastCall = ev('call', { direction: dir, outcome, with: who ? resolve(who) : p.chat.members[0], ring: num || 4 });
         events.push(lastCall);
-      } else if (['inbox', 'chat', 'lock', 'list'].includes(name)) events.push(ev('screen', { to: name === 'list' ? 'inbox' : name }));
-      else if (name === 'screen') events.push(ev('screen', { to: ['inbox', 'chat', 'lock'].includes(arg) ? arg : 'inbox' }));
+      } else if (['inbox', 'chat', 'lock', 'list', 'home'].includes(name)) events.push(ev('screen', { to: name === 'list' ? 'inbox' : name }));
+      else if (name === 'screen') events.push(ev('screen', { to: ['inbox', 'chat', 'lock', 'home'].includes(arg) ? arg : 'inbox' }));
+      else if (name === 'open') events.push(ev('openapp', { to: /inbox|list/i.test(arg) ? 'inbox' : 'chat' }));   // tap the chat app on the home screen
       else if (name === 'delete' || name === 'swipe') events.push(ev('swipe', { row: rowFor(arg) }));
       else if (name === 'vo' || name === 'narrator') events.push(ev('voiceover', { text: arg }));
       else if (name === 'sound') events.push(ev('sound', { sound: arg || 'notify' }));
@@ -320,8 +356,9 @@ export function toScript(p) {
       case 'read': out.push(e.text ? `[read ${e.text}]` : '[read]'); break;
       case 'react': out.push(`[react ${e.emoji}]`); break;
       case 'unsend': out.push('[unsend]'); break;
-      case 'notify': out.push(`[notify ${n(e.from)}: ${e.text}]`); break;
+      case 'notify': out.push(`[notify ${n(e.from)}: ${e.text}${APP_NAMES[e.app] && e.app !== 'auto' ? ` {${e.app}}` : ''}]`); break;
       case 'screen': out.push(`[${e.to}]`); break;
+      case 'openapp': out.push(`[open ${e.to}]`); break;
       case 'swipe': out.push(`[delete ${e.row === 'chat' ? chatTitle(p) : (p.inbox.find((r) => r.id === e.row)?.name || '')}]`); break;
       case 'call':
         out.push(`[call ${e.direction} ${n(e.with)} ${e.outcome} ${e.ring}]`);

@@ -2,12 +2,14 @@
 // to MP4 by the local server's ffmpeg. Fallback: realtime canvas + MediaRecorder capture.
 import { renderFrame } from './render/renderer.js';
 import { encodeWav } from './audio.js';
-import { ensureVisuals } from './media.js';
+import { ensureVisuals, ensureVideos, primeVideos, setVideoExport, setVideoPlaying } from './media.js';
 import { download } from './util.js';
 
 export async function preloadAssets(p, tl) {
-  const ids = [p.background.mediaId, p.wallpaper.mediaId, p.me.avatar, ...p.contacts.map((c) => c.avatar), ...p.inbox.map((r) => r.avatar), ...tl.items.map((i) => i.mediaId)];
+  const ids = [p.background.mediaId, p.wallpaper.mediaId, p.me.avatar, ...p.contacts.map((c) => c.avatar), ...p.inbox.map((r) => r.avatar), p.chat.avatar, ...tl.items.filter((i) => i.kind !== 'video').map((i) => i.mediaId),
+    ...(p.home?.apps || []).concat(p.home?.dock || []).map((a) => a.iconId), p.home?.wallpaper?.mediaId, ...p.events.flatMap((e) => [e.iconId, e.imageId])];
   await ensureVisuals(ids.filter(Boolean));
+  await ensureVideos(tl.items.filter((i) => i.kind === 'video'));
   const text = p.events.map((e) => [e.text, ...(e.lines || []).map((l) => l.text)].join(' ')).join(' ') + p.contacts.map((c) => c.name).join(' ');
   await Promise.all([
     document.fonts.load('17px Inter'), document.fonts.load('600 17px Inter'), document.fonts.load('700 17px Inter'),
@@ -53,9 +55,12 @@ export async function exportVideo({ p, tl, engine, width, height, fps, name, onP
   });
   enc.configure(cfg);
   const total = Math.ceil(tl.duration * fps);
+  setVideoExport(true);          // videos are seeked to the exact frame instead of following a clock
+  try {
   for (let i = 0; i < total; i++) {
     if (signal?.aborted) { enc.close(); throw new Error('Export cancelled'); }
     if (failed) throw failed;
+    await primeVideos(tl, i / fps);
     renderFrame(ctx, p, tl, i / fps);
     const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
     enc.encode(frame, { keyFrame: i % (fps * 2) === 0 });
@@ -64,6 +69,7 @@ export async function exportVideo({ p, tl, engine, width, height, fps, name, onP
     if (pendingBytes > 4e6) await flush();
     if (i % 10 === 0) { onProgress(i / total, `Rendering frame ${i} / ${total}`); await new Promise((r) => setTimeout(r, 0)); }
   }
+  } finally { setVideoExport(false); }
   await enc.flush();
   enc.close();
   await flush();
@@ -89,6 +95,7 @@ async function exportRealtime({ p, tl, engine, width, height, fps, name, onProgr
   await engine.prepare(tl, p);
   renderFrame(ctx, p, tl, 0);
   rec.start(500);
+  setVideoPlaying(true);
   engine.play(tl, p, 0);
   await new Promise((resolve) => {
     const loop = () => {
@@ -102,6 +109,7 @@ async function exportRealtime({ p, tl, engine, width, height, fps, name, onProgr
     loop();
   });
   engine.stop();
+  setVideoPlaying(false);
   await new Promise((r) => { rec.onstop = r; rec.stop(); });
   engine.master.disconnect(dest);
   const blob = new Blob(chunks, { type: rec.mimeType });

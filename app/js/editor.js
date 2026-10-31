@@ -3,10 +3,10 @@ import { h, popover, closePopover, modal, toast, pickFile, btn } from './ui.js';
 import { newProject, demoProject, migrate, newEvent, parseScript, toScript, EVENT_TYPES, SCRIPT_HELP, BUBBLE_FX, SCREEN_FX, CAMERA_FX, CAMERA_MOVES, CAMERA_TARGETS, nameOf, contact, chatTitle } from './model.js';
 import { compile } from './timeline.js';
 import { renderFrame } from './render/renderer.js';
-import { addMediaBlob, onMediaChange, mediaURL } from './media.js';
+import { addMediaBlob, onMediaChange, mediaURL, setVideoPlaying } from './media.js';
 import { putProject, getProject, listProjects, deleteProject, loadSettings, saveSettings, getMedia, putMedia } from './store.js';
 import { EMOJI } from './emoji.js';
-import { fmtTime, debounce, clone, uid, download, blobToDataURL, dataURLToBlob } from './util.js';
+import { fmtTime, debounce, clone, uid, download, blobToDataURL, dataURLToBlob, MEDIA_KEYS } from './util.js';
 import { Panels } from './panels.js';
 
 export class Editor {
@@ -216,7 +216,7 @@ export class Editor {
         !me ? h('span', { class: 'who', style: { color: c?.color } }, nameOf(p, e.from)) : null,
         h('div', { class: 'bub' + (e.vn ? ' vn' : '') + (e.draft && !e.text ? ' draft-only' : '') },
           e.vn ? h('span', { class: 'vn-chip' }, '🎤 ', e.voice?.dur ? `0:${String(Math.round(e.voice.dur)).padStart(2, '0')}` : 'voice note') : null,
-          !e.vn && e.mediaId ? h('img', { class: 'thumb', 'data-media': e.mediaId }) : null,
+          !e.vn && e.mediaId ? (e.mediaKind === 'video' ? h('span', { class: 'tag fx', title: 'A video' }, `🎬 ${(e.mediaDur || 0).toFixed(1)}s`) : h('img', { class: 'thumb', 'data-media': e.mediaId })) : null,
           !e.vn && e.draft ? h('del', { title: 'Typed, then deleted' }, e.draft) : null,
           e.text ? h('span', {}, e.text) : null,
           !e.text && !e.mediaId && !e.vn && !e.draft ? h('i', {}, 'empty message') : null),
@@ -267,7 +267,8 @@ export class Editor {
       case 'read': return e.text ? `Receipt · ${e.text}` : 'Marked as Read';
       case 'unsend': return 'Unsend message';
       case 'notify': return `Notification · ${n(e.from)}: ${e.text || '…'}`;
-      case 'screen': return `Go to ${({ chat: 'the chat', inbox: 'the messages list', lock: 'the lock screen' })[e.to] || e.to}`;
+      case 'screen': return `Go to ${({ chat: 'the chat', inbox: 'the messages list', lock: 'the lock screen', home: 'the home screen' })[e.to] || e.to}`;
+      case 'openapp': return `Tap the ${e.app && e.app !== 'auto' ? [...p.home.apps, ...p.home.dock].find((a) => a.id === e.app)?.name || 'app' : 'chat app'} · opens ${e.to === 'inbox' ? 'the messages list' : 'the chat'}`;
       case 'swipe': return `Swipe to delete · ${e.row === 'chat' ? chatTitle(p) : p.inbox.find((r) => r.id === e.row)?.name || '?'}`;
       case 'call': return `${e.direction === 'out' ? 'Call' : 'Incoming call from'} ${n(e.with)} · ${({ answer: 'answered', decline: 'declined', missed: 'missed' })[e.outcome]}${e.lines.length ? ` · ${e.lines.length} line${e.lines.length > 1 ? 's' : ''}` : ''}`;
       case 'voiceover': return `Voice-over · ${e.text || '…'}`;
@@ -381,13 +382,16 @@ export class Editor {
   }
 
   async addImages(files) {
-    files = files || await pickFile('image/*', true);
+    files = files || await pickFile('image/*,video/*', true);
     const evs = [];
     for (const f of files) {
-      const rec = await addMediaBlob(f, f.name);
-      evs.push(newEvent('msg', { from: this.sender, mediaId: rec.id, text: '' }, this.p));
+      try {
+        const rec = await addMediaBlob(f, f.name);
+        const video = rec.kind === 'video';
+        evs.push(newEvent('msg', { from: this.sender, mediaId: rec.id, text: '', ...(video ? { mediaKind: 'video', mediaDur: rec.dur } : {}) }, this.p));
+      } catch (err) { toast(`${f.name}: ${err.message}`, 'error'); }
     }
-    this.insert(evs);
+    if (evs.length) this.insert(evs);
   }
 
   emojiPicker(anchor, onPick) {
@@ -491,7 +495,7 @@ export class Editor {
 
   async exportProject() {
     const ids = new Set();
-    const walk = (o) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if ((k === 'mediaId' || k === 'avatar') && typeof v === 'string') ids.add(v); else if (k === 'overrides') Object.values(v || {}).forEach((x) => x && ids.add(x)); else walk(v); } };
+    const walk = (o) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if (MEDIA_KEYS.includes(k) && typeof v === 'string') ids.add(v); else if (k === 'overrides') Object.values(v || {}).forEach((x) => x && ids.add(x)); else walk(v); } };
     walk(this.p);
     const media = {};
     for (const id of ids) {
@@ -586,6 +590,7 @@ export class Editor {
     await this.prepareAudio();
     this.seek(t);
     this.engine.play(this.tl, this.p, this.t);
+    setVideoPlaying(true);
     this.playing = true;
     document.getElementById('btnPlay').textContent = '❚❚';
   }
@@ -593,6 +598,7 @@ export class Editor {
   pause() {
     if (this.playing) this.t = Math.min(this.engine.now(), this.tl.duration);
     this.engine.stop();
+    setVideoPlaying(false);
     this.playing = false;
     const b = document.getElementById('btnPlay');
     if (b) b.textContent = '▶';

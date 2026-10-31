@@ -305,47 +305,6 @@ export function homeIndicator(ctx, W, H, color, os) {
   else fillRR(ctx, W / 2 - 67, H - 9, 134, 5, 2.5, color);
 }
 
-// App icon used in banners and lock notifications.
-export function appIcon(ctx, theme, x, y, s) {
-  ctx.save();
-  if (theme === 'phone') {
-    const g = ctx.createLinearGradient(0, y, 0, y + s);
-    g.addColorStop(0, '#67FF72'); g.addColorStop(1, '#0BBD27');
-    rr(ctx, x, y, s, s, s * 0.23); ctx.fillStyle = g; ctx.fill();
-    icon(ctx, 'phone', x + s / 2, y + s / 2, s * 0.58, '#FFFFFF');
-  } else if (theme === 'whatsapp') {
-    fillRR(ctx, x, y, s, s, s * 0.23, '#25D366');
-    circle(ctx, x + s / 2, y + s / 2, s * 0.3, '#FFFFFF');
-    circle(ctx, x + s / 2, y + s / 2, s * 0.24, '#25D366');
-    icon(ctx, 'phone', x + s / 2, y + s / 2, s * 0.3, '#FFFFFF');
-  } else if (theme === 'instagram') {
-    const g = ctx.createLinearGradient(x, y + s, x + s, y);
-    g.addColorStop(0, '#FEDA75'); g.addColorStop(0.35, '#FA7E1E'); g.addColorStop(0.6, '#D62976'); g.addColorStop(1, '#4F5BD5');
-    rr(ctx, x, y, s, s, s * 0.23); ctx.fillStyle = g; ctx.fill();
-    ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = s * 0.07;
-    rr(ctx, x + s * 0.22, y + s * 0.22, s * 0.56, s * 0.56, s * 0.16); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x + s / 2, y + s / 2, s * 0.13, 0, Math.PI * 2); ctx.stroke();
-    circle(ctx, x + s * 0.66, y + s * 0.34, s * 0.035, '#FFFFFF');
-  } else if (theme === 'android') {
-    fillRR(ctx, x, y, s, s, s / 2, '#0B57D0');
-    icon(ctx, 'message', x + s / 2, y + s / 2 + s * 0.02, s * 0.56, '#FFFFFF');
-  } else {
-    const g = ctx.createLinearGradient(0, y, 0, y + s);
-    g.addColorStop(0, '#67FF72'); g.addColorStop(1, '#0BBD27');
-    rr(ctx, x, y, s, s, s * 0.23); ctx.fillStyle = g; ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.ellipse(x + s / 2, y + s * 0.47, s * 0.33, s * 0.27, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(x + s * 0.3, y + s * 0.62);
-    ctx.quadraticCurveTo(x + s * 0.28, y + s * 0.76, x + s * 0.2, y + s * 0.8);
-    ctx.quadraticCurveTo(x + s * 0.38, y + s * 0.78, x + s * 0.45, y + s * 0.7);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
 // Translucent touch dot (for showing taps and swipes in videos).
 export function touchDot(ctx, x, y, alpha, pressed = 1) {
   if (alpha <= 0) return;

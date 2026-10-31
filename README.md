@@ -41,8 +41,9 @@ npm install
 npm run desktop                                # run from source
 npm run dist                                   # Windows: dist/FakePhone-Setup-<version>.exe
 npm run dist:mac                               # on a Mac: dist/FakePhone-<version>-mac-<arch>.dmg
-node tools/desktop-smoke.mjs                   # 21 checks from source (throwaway data in D:\Cache\fakephone-smoke)
+node tools/desktop-smoke.mjs                   # 26 checks from source (throwaway data in D:\Cache\fakephone-smoke)
 node tools/desktop-smoke.mjs "C:\...\Fake Phone.exe"   # the same checks on an installed copy
+node tools/model-check.mjs                     # old projects still open, the new script commands round-trip
 ```
 
 The page loads from `fakephone://app` (a secure origin, so WebCodecs and the mic work, and saved projects keep one origin) and every request is passed to `server.js`, which runs inside the app on a free port. `tools/fetch-fonts.mjs` refreshes the local fonts, `tools/make-icon.py` the installer icon. The bundled ffmpeg (ffmpeg-static, gyan.dev essentials build) is GPL: its license is in `resources/ffmpeg`.
@@ -55,7 +56,11 @@ The page loads from `fakephone://app` (a secure origin, so WebCodecs and the mic
 - **Send effects:** Slam, Loud, Gentle, Invisible Ink on bubbles; Confetti, Balloons, Fireworks, Love, Lasers, Celebration, Spotlight, Echo over the screen, each with its own sound.
 - **Camera:** per message (zoom in on it, punch-in, shake) or as camera beats (zoom that stays and follows the newest bubble, slow push-in, back to full view, shake). Zooms follow their target as the chat scrolls and never crop it; curves come from the Motion tab.
 - **Voice notes:** audio bubbles with a waveform drawn from the real audio; theirs play after they land (WhatsApp shows "recording audio…"), yours can be recorded live (recording bar runs while the voice plays) or sent then played.
-- **Screens:** chat, messages list with swipe-to-delete, lock screen with notifications, notification banners, incoming/outgoing calls (answered with a running timer and spoken lines, declined, missed).
+- **Screens:** chat, messages list with swipe-to-delete, lock screen with notifications, notification banners, incoming/outgoing calls (answered with a running timer and spoken lines, declined, missed), and the **home screen**.
+- **Home screen:** iPhone (4 columns, dock, Search pill) or Android launcher (round icons, date widget, search bar). Edit the apps in the Home tab: ~30 drawn app icons (Messages, WhatsApp, Instagram, Facebook, Snapchat, TikTok, Cash App...) or your own uploaded icon, names, red badge numbers, dock, wallpaper. "Open an app" taps the chat app's icon with a finger and the app grows out of it (and shrinks back into it on the way home). A notification adds a badge to its app's icon.
+- **Notifications:** every notification can come from any app (preset icon, or a custom app name + icon you upload), with its own bold title, the sender's profile photo with a small app badge, and an attached picture. iPhone and Android styles, banner or lock-screen list; a new banner replaces the one still showing.
+- **Profile pictures:** the People tab has one place to change all of them: you, each person, the group photo, and every other conversation in the messages list. They show in chats, the messages list, calls and notifications.
+- **Videos:** send a video as a message. By default someone taps it and it opens in a full-screen player (Done/back, progress bar, time left), plays with its sound, and closes; or it can play right in the bubble. Exports are frame-exact and the video's sound is mixed in (background music dips under it).
 - **Sound:** synthesized phone sounds (send, receive, notifications, key clicks, ringtone, hang up...), each replaceable with your own file. Background music (Sound tab) fades in/out and dips automatically under every voice.
 - **Voices:** per message / call line / voice-over: ElevenLabs AI voice (your key, stored only in this browser), a mic recording (silence trimmed), or an audio file. A whole-video narration take can be recorded over playback. Captions optional.
 - **Motion:** every animation runs on a PulseCore curve (`app/js/vendor/pulse`, easing + spring physics); the Motion tab sets the curve and length per animation.
@@ -82,10 +87,12 @@ Anthony: I GOT THE JOB {slam} {confetti} {zoom}   effects + camera tags after th
 [unsend]
 [time Today 9:41 AM]
 [notify Mom: did you book it??]
+[notify Jess: tagged you in a photo {facebook}]   app tag after the text: facebook snapchat tiktok cashapp venmo ...
 [call in Anthony answer]     in/out, answer/decline/missed
 > Anthony: Hey, you there?   lines spoken on the call
 > me: yeah what's up
-[inbox] [chat] [lock]        change screen
+[inbox] [chat] [lock] [home]   change screen
+[open chat]          tap the chat app's icon on the home screen and open it ([open inbox] = the messages list)
 [delete Spam Likely]         swipe to delete in the messages list
 narrator: And that's when everything changed...
 [sound boom]
@@ -99,7 +106,7 @@ Lines above `---` are already on screen when the video starts.
 - `desktop/main.js` - the Electron app (window, `fakephone://` protocol, bundled ffmpeg, exports folder)
 - `app/fonts/` - local copies of Anton, Inter, Roboto, Noto Color Emoji (SIL OFL)
 - `app/js/timeline.js` - compiles the script into a timed timeline (everything is a function of time, so scrubbing and export are exact)
-- `app/js/render/` - canvas phone renderer (chat, keyboard, screens, compositor)
+- `app/js/render/` - canvas phone renderer (chat, keyboard, screens, compositor; `home.js` home screen, `appicons.js` app icons, `player.js` full-screen video player)
 - `app/js/editor.js`, `panels.js`, `ui.js` - the editor
 - `app/js/audio.js`, `voice.js`, `export.js` - sound, voices, video export
-- `app/dev/sheet.html` - render sheet for checking looks (`?theme=whatsapp&dark=1&save=name` writes `exports/_dev/name.png`)
+- `app/dev/sheet.html` - render sheet for checking looks (`?theme=whatsapp&dark=1&save=name` writes `exports/_dev/name.png`; `?script=...` and `?startScreen=home` too), `app/dev/icons.html` - every app icon on one page

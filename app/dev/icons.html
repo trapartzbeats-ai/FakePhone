@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>App icon sheet</title>
+<link rel="stylesheet" href="../fonts/fonts.css">
+<style>body { margin: 0; background: #2a2a30; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// All app icons in one grid. ?save=name writes exports/_dev/name.png, ?round=1 draws the Android round shape.
+import { drawApp } from '../js/render/appicons.js';
+import { APP_ORDER, APP_NAMES } from '../js/apps.js';
+import { newProject } from '../js/model.js';
+import { setFonts } from '../js/themes.js';
+
+const q = new URLSearchParams(location.search);
+const p = newProject();
+setFonts(p);
+await document.fonts.load('800 17px Inter');
+await document.fonts.load('300 17px Inter');
+const cols = 8, size = 120, pad = 30;
+const items = [...APP_ORDER, 'custom'];
+const rows = Math.ceil(items.length / cols);
+const c = document.getElementById('c');
+c.width = cols * (size + pad) + pad;
+c.height = rows * (size + pad + 22) + pad;
+const g = c.getContext('2d');
+g.fillStyle = '#2a2a30'; g.fillRect(0, 0, c.width, c.height);
+items.forEach((id, i) => {
+  const x = pad + (i % cols) * (size + pad), y = pad + Math.floor(i / cols) * (size + pad + 22);
+  drawApp(g, id === 'custom' ? { app: 'custom', name: 'Zed', color: '#C43E8F' } : id, x, y, size, p, { round: q.get('round') === '1' });
+  g.fillStyle = '#ddd'; g.font = '14px Inter'; g.textAlign = 'center';
+  g.fillText(id === 'custom' ? 'custom (lettered)' : APP_NAMES[id], x + size / 2, y + size + 18);
+});
+if (q.get('save')) {
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  await fetch('/api/dev/save?name=' + encodeURIComponent(q.get('save')), { method: 'POST', body: blob });
+  document.title = 'saved';
+}
+</script>
+</body>
+</html>

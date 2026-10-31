@@ -5,16 +5,19 @@ import { unreadAt } from '../timeline.js';
 import { lin, val } from '../motion.js';
 import { chatTitle, nameOf, contact } from '../model.js';
 import { visual, frameAt } from '../media.js';
-import { fillRR, circle, wrap, icon, chevron, avatar, avatarOf, ellipsize, fillBackdrop, appIcon, touchDot } from './draw.js';
+import { fillRR, circle, wrap, icon, chevron, avatar, avatarOf, ellipsize, fillBackdrop, touchDot } from './draw.js';
+import { drawApp, appName } from './appicons.js';
+import { themeApp } from '../apps.js';
 
 // ---- messages list -----------------------------------------------------------------
 function lastPreview(R, t) {
   let last = null;
   for (const it of R.tl.items) {
-    if ((it.kind === 'msg' || it.kind === 'image' || it.kind === 'voice') && it.tIn <= t && !(it.tOut != null && t >= it.tOut)) last = it;
+    if ((it.kind === 'msg' || it.kind === 'image' || it.kind === 'video' || it.kind === 'voice') && it.tIn <= t && !(it.tOut != null && t >= it.tOut)) last = it;
   }
   if (!last) return '';
   if (last.kind === 'image') return last.side === 'me' ? 'You sent an image' : 'Image';
+  if (last.kind === 'video') return last.side === 'me' ? 'You sent a video' : 'Video';
   if (last.kind === 'voice') return R.fam === 'ios' ? 'Audio Message' : (last.side === 'me' ? 'You: ' : '') + '🎤 Voice message';
   return (R.fam === 'whatsapp' || R.fam === 'instagram') && last.side === 'me' ? (R.fam === 'instagram' ? 'You: ' : '') + last.text : last.text;
 }
@@ -164,7 +167,8 @@ function drawInboxRow(ctx, R, row, y, rowH, avR, textX, t) {
   const cy = y + rowH / 2;
   const ax = fam === 'ios' ? 20 + avR + 6 : 16 + avR;
   if (row.id === 'chat') {
-    if (row.group) {
+    if (row.group && p.chat.avatar) avatarOf(ctx, { name: chatTitle(p), color: '#8E8E93', avatar: p.chat.avatar }, ax, cy, avR, t, { ios: fam === 'ios' });
+    else if (row.group) {
       const ids = p.chat.members.slice(0, 2);
       ids.forEach((id, i) => avatar(ctx, p, id, ax + (i ? 9 : -7), cy + (i ? 8 : -7), avR * 0.66, t, { ios: fam === 'ios' }));
     } else avatar(ctx, p, row.who, ax, cy, avR, t, { ios: fam === 'ios' });
@@ -244,7 +248,7 @@ export function drawLock(ctx, R, t) {
     ctx.translate(W / 2, cy + (1 - k) * 30);
     ctx.scale(sc, sc);
     ctx.translate(-W / 2, -cy);
-    drawNoteCard(ctx, R, n, 10, y, W - 20, h, android ? 'android-lock' : 'lock');
+    drawNoteCard(ctx, R, n, 10, y, W - 20, android ? 'android-lock' : 'lock');
     ctx.restore();
     y += (h + 8) * clamp(k, 0, 1);
   }
@@ -263,33 +267,71 @@ export function drawLock(ctx, R, t) {
   }
 }
 
-function noteLines(ctx, R, n, w) {
-  ctx.font = font(15, 400);
-  return wrap(ctx, n.text || '', w - 82).slice(0, 4);
-}
-function noteHeight(ctx, R, n) {
-  return 44 + noteLines(ctx, R, n, R.W - 20).length * 19;
+// ---- notification cards (banners + lock screen list) -------------------------------------
+// n = { from, text, title, app ('auto' = the chat app of the look), appName/appColor/iconId (custom app), photo, imageId, call }
+function noteApp(R, n) {
+  if (n.call) return 'phone';
+  if (n.app === 'custom') return { app: 'custom', name: n.appName || n.title, color: n.appColor, iconId: n.iconId };
+  return n.app && n.app !== 'auto' ? n.app : themeApp(R.p.theme);
 }
 
+// Wrapped text and card height, the same for the banner and the lock list (so rows stack without gaps).
+function noteLayout(ctx, R, n) {
+  const android = R.dev.os === 'android';
+  const side = n.imageId || (android && n.photo) ? 58 : 0;       // attached picture / big sender photo on the right
+  const w = R.W - 20 - (android ? 28 : 76) - side;
+  ctx.font = font(android ? 14.5 : 15, 400);
+  const lines = wrap(ctx, n.text || '', w).slice(0, 4);
+  let h = android ? 62 + lines.length * 19 : 44 + lines.length * 19;
+  if (n.imageId) h = Math.max(h, android ? 86 : 90);
+  return { lines, h, android, side };
+}
+function noteHeight(ctx, R, n) { return noteLayout(ctx, R, n).h; }
+
 // Notification card shared by banners and the lock screen.
-function drawNoteCard(ctx, R, n, x, y, w, h, style) {
+function drawNoteCard(ctx, R, n, x, y, w, style) {
   const { pal, p } = R;
+  const { lines, h, android } = noteLayout(ctx, R, n);
   const lock = style === 'lock' || style === 'android-lock';
   const dark = lock ? false : pal.dark;
   ctx.save();
   if (!lock) { ctx.shadowColor = 'rgba(0,0,0,0.22)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; }
   const bg = lock ? 'rgba(245,245,247,0.78)' : dark ? 'rgba(44,44,46,0.97)' : 'rgba(250,250,250,0.97)';
-  fillRR(ctx, x, y, w, h, style === 'android' || style === 'android-lock' ? 24 : 22, bg);
+  fillRR(ctx, x, y, w, h, android ? 24 : 22, bg);
   ctx.restore();
   const ink = dark ? '#FFFFFF' : '#000000';
   const sub = dark ? 'rgba(235,235,245,0.6)' : 'rgba(60,60,67,0.6)';
-  const app = n.call ? 'phone' : p.theme === 'sms' ? 'imessage' : p.theme;
-  appIcon(ctx, app, x + 12, y + 13, 38);
-  ctx.textAlign = 'left';
+  const app = noteApp(R, n);
+  const who = n.from === 'me' ? { name: p.me.name, avatar: p.me.avatar, color: '#8E8E93' } : contact(p, n.from) || { name: nameOf(p, n.from), color: '#8E8E93' };
+  const title = n.title || nameOf(p, n.from);
   ctx.textBaseline = 'alphabetic';
+
+  if (android) {
+    drawApp(ctx, app, x + 14, y + 11, 17, p, { round: true });
+    ctx.font = font(12.5, 500);
+    ctx.fillStyle = sub;
+    ctx.textAlign = 'left';
+    ctx.fillText(`${ellipsize(ctx, appName(app) || 'App', w - 140)} • now`, x + 38, y + 24);
+    ctx.font = font(15, 600);
+    ctx.fillStyle = ink;
+    ctx.fillText(ellipsize(ctx, title, w - 28 - (n.imageId || n.photo ? 58 : 0)), x + 14, y + 46);
+    ctx.font = font(14.5, 400);
+    lines.forEach((l, i) => ctx.fillText(l, x + 14, y + 67 + i * 19));
+    if (n.imageId) drawNoteThumb(ctx, n.imageId, x + w - 14 - 44, y + 16, 44, 8);
+    else if (n.photo) avatarOf(ctx, who, x + w - 14 - 22, y + 38, 22, 0);
+    return;
+  }
+  if (n.photo) {
+    avatarOf(ctx, who, x + 12 + 19, y + 13 + 19, 19, 0, { ios: true });
+    ctx.save();
+    circle(ctx, x + 12 + 31, y + 13 + 31, 10.5, lock ? 'rgba(245,245,247,1)' : dark ? '#2C2C2E' : '#FAFAFA');
+    drawApp(ctx, app, x + 12 + 23, y + 13 + 23, 16, p);
+    ctx.restore();
+  } else drawApp(ctx, app, x + 12, y + 13, 38, p);
+  ctx.textAlign = 'left';
   ctx.font = font(15, 600);
   ctx.fillStyle = ink;
-  ctx.fillText(ellipsize(ctx, nameOf(p, n.from), w - 130), x + 62, y + 30);
+  ctx.fillText(ellipsize(ctx, title, w - 130), x + 62, y + 30);
   ctx.font = font(13, 400);
   ctx.fillStyle = sub;
   ctx.textAlign = 'right';
@@ -297,7 +339,20 @@ function drawNoteCard(ctx, R, n, x, y, w, h, style) {
   ctx.textAlign = 'left';
   ctx.font = font(15, 400);
   ctx.fillStyle = ink;
-  noteLines(ctx, R, n, w + 20).forEach((l, i) => ctx.fillText(l, x + 62, y + 50 + i * 19));
+  lines.forEach((l, i) => ctx.fillText(l, x + 62, y + 50 + i * 19));
+  if (n.imageId) drawNoteThumb(ctx, n.imageId, x + w - 12 - 44, y + h - 12 - 44, 44, 8);
+}
+
+function drawNoteThumb(ctx, id, x, y, s, r) {
+  const v = visual(id);
+  ctx.save();
+  ctx.beginPath(); ctx.roundRect(x, y, s, s, r); ctx.clip();
+  if (v) {
+    const bmp = frameAt(v, 0);
+    const k = Math.max(s / bmp.width, s / bmp.height);
+    ctx.drawImage(bmp, x + (s - bmp.width * k) / 2, y + (s - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+  } else { ctx.fillStyle = 'rgba(120,120,128,0.3)'; ctx.fillRect(x, y, s, s); }
+  ctx.restore();
 }
 
 export function drawBanners(ctx, R, t) {
@@ -310,7 +365,7 @@ export function drawBanners(ctx, R, t) {
     const h = noteHeight(ctx, R, b);
     const restY = dev.os === 'android' ? dev.safeTop - 2 : dev.safeTop - 6;
     const y = lerp(-h - 20, restY, kIn) - kOut * (h + restY + 30);
-    drawNoteCard(ctx, R, b, 8, y, W - 16, h, dev.os === 'android' ? 'android' : 'banner');
+    drawNoteCard(ctx, R, b, 8, y, W - 16, dev.os === 'android' ? 'android' : 'banner');
   }
 }
 

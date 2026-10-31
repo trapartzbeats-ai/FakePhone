@@ -156,6 +156,37 @@ const tab = await a.run(`
     listed: [...document.querySelectorAll('a.export-file')].some((x) => x.textContent.startsWith('smoke test.mp4')) };
 `);
 check('Export tab shows the folder, Change folder… and the video', tab.folder && tab.change && tab.listed, JSON.stringify(tab));
+
+// ---- video playback: a 3 s clip whose brightness is its own clock (grey = 255 * seconds / 3), sent as a video
+// message that opens full screen. The exported frames must show the right moment of the clip, and its sound.
+const clip = path.join(WORK, 'exports', 'ramp.mp4');
+const mk = spawnSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'nullsrc=s=360x640:r=30,geq=lum=16+219*T/3:cb=128:cr=128',
+  '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast', '-c:a', 'aac', clip]);
+check('test clip made', mk.status === 0 && fs.existsSync(clip), mk.stderr?.toString().slice(0, 120));
+const vid = await a.run(`
+  const media = await import('./js/media.js'), model = await import('./js/model.js'), { exportVideo } = await import('./js/export.js');
+  const blob = await (await fetch('/exports/ramp.mp4')).blob();
+  const rec = await media.addMediaBlob(new Blob([blob], { type: 'video/mp4' }), 'ramp.mp4');
+  const ed = window.fakePhone;
+  const p = model.migrate(model.newProject('video smoke'));
+  p.events = [model.newEvent('msg', { from: 'c1', text: '', mediaId: rec.id, mediaKind: 'video', mediaDur: rec.dur, vmode: 'full' }, p)];
+  ed.load(p);
+  const pl = ed.tl.players[0];
+  const out = await exportVideo({ p: ed.p, tl: ed.tl, engine: ed.engine, width: 720, height: 1280, fps: 30, name: 'video smoke', onProgress() {} });
+  return { rec: { kind: rec.kind, w: rec.w, h: rec.h, dur: rec.dur }, pl, file: out.file, duration: ed.tl.duration };
+`, 600).catch((e) => ({ error: e.message }));
+if (vid.error) check('video message exports', false, vid.error);
+else {
+  check('video file is read (size, length)', vid.rec.kind === 'video' && vid.rec.w === 360 && vid.rec.h === 640 && Math.abs(vid.rec.dur - 3) < 0.2, JSON.stringify(vid.rec));
+  check('video export finishes', fs.existsSync(vid.file), path.basename(vid.file));
+  // grey level of a small box in the middle of the screen at time t (the player shows the clip there)
+  const grey = (t) => spawnSync(FFMPEG, ['-v', 'error', '-ss', String(t), '-i', vid.file, '-frames:v', '1', '-vf', 'crop=40:40:340:620,scale=1:1', '-pix_fmt', 'gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 20 }).stdout[0];
+  const worst = [0.5, 1.4, 2.4].map((dt) => { const lt = (grey(vid.pl.tPlay + dt) / 255) * 3; return { dt, lt: Math.round(lt * 100) / 100, off: Math.abs(lt - dt) }; });
+  check('exported frames show the right moment of the clip', worst.every((w) => w.off < 0.3), worst.map((w) => `${w.dt}s -> ${w.lt}s`).join(', '));
+  const vol = (from, to) => Number((spawnSync(FFMPEG, ['-hide_banner', '-ss', String(from), '-t', String(to - from), '-i', vid.file, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr.match(/mean_volume: (-?[\d.]+) dB/) || [])[1]);
+  const during = vol(vid.pl.tPlay + 0.3, vid.pl.tPlay + 2.7);
+  check('the clip\'s sound is in the video while it plays', during > -35, `${during} dB`);
+}
 check('no page errors (second launch)', a.errors().length === 0, a.errors().slice(0, 3).join(' | '));
 await a.close();
 

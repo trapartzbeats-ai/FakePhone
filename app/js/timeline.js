@@ -5,6 +5,7 @@ import { keyFor } from './keys.js';
 import { THEMES, DEVICES, soundSet } from './themes.js';
 import { resolveMotion, curve } from './motion.js';
 import { BUBBLE_FX, SCREEN_FX } from './model.js';
+import { themeApp } from './apps.js';
 
 const speakEstimate = (text) => 0.5 + words(text) * 0.36;
 const R_AUDIO = { ios: 'Audio Message', whatsapp: '🎤 Voice message', android: 'Voice message', instagram: 'Sent a voice message' };
@@ -16,6 +17,13 @@ export function compile(p) {
   const snd = soundSet(p.theme);
   const theme = THEMES[p.theme] || THEMES.imessage;
   const members = p.chat.members;
+  // home screen: which icon opens the chat app, and the red badge counts
+  const homeAll = [...(p.home?.apps || []), ...(p.home?.dock || [])];
+  const themeKey = themeApp(p.theme);
+  const themeHome = () => homeAll.find((a) => a.app === themeKey) || null;
+  const badgeCount = {};
+  for (const a of homeAll) if (badgeCount[a.app] == null) badgeCount[a.app] = a.badge || 0;
+  const setBadge = (key, n, at) => { if (!key) return; badgeCount[key] = n; out.badges.push({ t: at, key, n }); };
   const mo = resolveMotion(p);
   const TRANS = mo.screen.dur, KB_SLIDE = mo.keyboard.dur, SWIPE_LEN = mo.swipe.dur, CALL_FADE = mo.call.dur;
 
@@ -23,7 +31,7 @@ export function compile(p) {
     mo,
     pre: [], items: [], kbShow: [], compose: [], receipts: [], reactions: [],
     screens: [{ t: -1, to: p.startScreen, from: p.startScreen }],
-    banners: [], lockNotes: [], swipes: [], calls: [], audio: [], captions: [],
+    banners: [], lockNotes: [], swipes: [], calls: [], audio: [], captions: [], taps: [], badges: [], players: [],
     headerStatus: [], unread: [], records: [], shots: [], shakes: [], fx: [], marks: {}, duration: 0, kbStyle,
   };
 
@@ -63,16 +71,24 @@ export function compile(p) {
     if (p.captions) out.captions.push({ t0: at, t1: at + dur, text: v.say || text, who });
     return dur;
   };
-  const go = (to, at) => {
+  const go = (to, at, x = {}) => {
     if (to === screen) return 0;
-    out.screens.push({ t: at, to, from: screen });
+    const entry = { t: at, to, from: screen };
+    // between the home screen and an app the app grows out of / shrinks into its icon
+    if ((screen === 'home' && (to === 'chat' || to === 'inbox')) || (to === 'home' && (screen === 'chat' || screen === 'inbox'))) {
+      entry.kind = 'app';
+      entry.dur = mo.appOpen.dur;
+      entry.app = x.app || themeHome()?.id || null;
+      if (to !== 'home') { const a = homeAll.find((h) => h.id === entry.app); if (a) setBadge(a.app, 0, at); }
+    }
+    out.screens.push(entry);
     if (to !== 'chat') setKb(false, at);
-    else if (p.keyboard === 'always') setKb(true, at + TRANS * 0.6);
+    else if (p.keyboard === 'always') setKb(true, at + (entry.dur ?? TRANS) * 0.6);
     if (to === 'chat') out.unread.push({ t: at, unread: false });
     if (screen === 'lock') sfx('unlock', at);
     if (to === 'lock') sfx('lock', at);
     screen = to;
-    return TRANS + 0.15;
+    return (entry.dur ?? TRANS) + 0.15;
   };
 
   for (const ev of p.events) {
@@ -82,13 +98,14 @@ export function compile(p) {
         const side = ev.from === 'me' ? 'me' : 'them';
         const vn = !!ev.vn;
         const isImage = !!ev.mediaId && !vn;
+        const isVideo = isImage && ev.mediaKind === 'video';
         const text = ev.text || '';
         const draft = side === 'me' && !vn ? (ev.draft || '').trim() : '';
         const items = [];
         if (vn) {
           items.push({ id: ev.id, evId: ev.id, kind: 'voice', side, from: ev.from, dur: ev.voice?.dur || speakEstimate(text), peaks: ev.voice?.peaks || null, seed: hashInt(ev.id) });
         } else {
-          if (isImage) items.push({ id: ev.id, evId: ev.id, kind: 'image', side, from: ev.from, mediaId: ev.mediaId });
+          if (isImage) items.push({ id: ev.id, evId: ev.id, kind: isVideo ? 'video' : 'image', side, from: ev.from, mediaId: ev.mediaId, ...(isVideo ? { dur: ev.mediaDur || 5 } : {}) });
           if (text || (!isImage && !draft)) items.push({ id: isImage ? ev.id + '_t' : ev.id, evId: ev.id, kind: 'msg', side, from: ev.from, text, big: isEmojiOnly(text) });
         }
         const sends = items.length > 0;     // a draft with no text is typed, deleted and never sent
@@ -170,7 +187,7 @@ export function compile(p) {
           tIn = t + (indicator ? 0 : 0.15);
           if (grow) items.forEach((it) => { it.grow = true; });
           if (vn) items[0].tPlay = tIn + 0.6;
-          const note = vn ? (R_AUDIO[theme.family] || 'Voice message') : text || 'Sent an image';
+          const note = vn ? (R_AUDIO[theme.family] || 'Voice message') : text || (isVideo ? 'Sent a video' : 'Sent an image');
           if (screen === 'chat') sfx(snd.receive, tIn);
           else if (screen === 'lock') { out.lockNotes.push({ t: tIn, from: ev.from, text: note }); sfx(snd.notify, tIn); }
           else if (screen === 'inbox') { out.unread.push({ t: tIn, unread: true }); sfx(snd.receive, tIn); }
@@ -196,6 +213,24 @@ export function compile(p) {
         } else if (!vn) {
           const vd = voice(ev.voice, tIn, ev.from, text);
           if (vd) hold = Math.max(hold, vd + 0.25);
+        }
+        // a video plays in its bubble, or (default) someone taps it and it opens in a full-screen player
+        const vid = isVideo ? items.find((it) => it.kind === 'video') : null;
+        if (vid) {
+          let tPlay;
+          if (ev.vmode !== 'inline' && screen === 'chat') {
+            const tTap = tIn + 0.75, tOpen = tTap + 0.35, openDur = 0.45, closeDur = 0.4;
+            tPlay = tOpen + openDur + 0.1;
+            const tEnd = tPlay + vid.dur, tClose = tEnd + 0.7;
+            out.players.push({ evId: ev.id, mediaId: ev.mediaId, side, from: ev.from, tTap, tOpen, openDur, tPlay, dur: vid.dur, tEnd, tClose, closeDur });
+            sfx('tap', tTap + 0.28);
+            hold = Math.max(hold, tClose + closeDur + 0.35 - tIn);
+          } else {
+            tPlay = tIn + 0.6;
+            hold = Math.max(hold, tPlay + vid.dur + 0.5 - tIn);
+          }
+          vid.tPlay = tPlay;
+          out.audio.push({ t: tPlay, media: ev.mediaId, dur: vid.dur, bus: 'voice' });
         }
         if (screen === 'chat') {
           if (BUBBLE_FX[ev.effect]) {
@@ -262,14 +297,28 @@ export function compile(p) {
 
       case 'notify': {
         const from = ev.from || members[0];
-        if (screen === 'lock') out.lockNotes.push({ t, from, text: ev.text });
-        else out.banners.push({ t0: t, t1: t + (ev.dur ?? 3.5), from, text: ev.text });
+        // which app it comes from, an optional bold title, sender photo and attached picture
+        const note = { from, text: ev.text, title: ev.title || '', app: ev.app || 'auto', appName: ev.appName || '', appColor: ev.appColor, iconId: ev.iconId || null, photo: !!ev.photo, imageId: ev.imageId || null };
+        if (screen === 'lock') out.lockNotes.push({ t, ...note });
+        else out.banners.push({ t0: t, t1: t + (ev.dur ?? 3.5), ...note });
+        if (ev.badge !== false) { const key = ev.app === 'custom' ? null : ev.app && ev.app !== 'auto' ? ev.app : themeKey; if (key) setBadge(key, (badgeCount[key] || 0) + 1, t + 0.35); }
         sfx(snd.notify, t);
         t += ev.wait ?? 1.6;
         break;
       }
 
       case 'screen': t += go(ev.to || 'chat', t); break;
+
+      case 'openapp': {
+        // go to the home screen, tap the app's icon, and it opens
+        if (screen !== 'home') t += go('home', t) + 0.15;
+        const app = ev.app && ev.app !== 'auto' ? homeAll.find((a) => a.id === ev.app) : themeHome();
+        out.taps.push({ t0: t, app: app?.id || null });
+        sfx('tap', t + 0.3);
+        t += 0.55;
+        t += go(ev.to === 'inbox' ? 'inbox' : 'chat', t, { app: app?.id });
+        break;
+      }
 
       case 'swipe': {
         if (screen !== 'inbox') t += go('inbox', t) + 0.2;
@@ -369,6 +418,9 @@ export function compile(p) {
   }
   out.audio.sort((a, b) => a.t - b.t);
   out.shots.sort((a, b) => a.t - b.t);
+  // a new banner replaces the one still showing (which leaves as the next one drops in)
+  out.banners.sort((a, b) => a.t0 - b.t0);
+  out.banners.forEach((b, i) => { const nx = out.banners[i + 1]; if (nx && nx.t0 < b.t1) b.t1 = Math.max(b.t0 + 0.4, nx.t0); });
   out.items = [...out.pre, ...out.items];
   return out;
 }
@@ -377,8 +429,8 @@ export function compile(p) {
 export function screenAt(tl, t) {
   let cur = tl.screens[0], prev = null;
   for (const s of tl.screens) if (s.t <= t) { prev = cur; cur = s; }
-  const k = cur.t < 0 ? 1 : clamp((t - cur.t) / tl.mo.screen.dur, 0, 1);
-  return { to: cur.to, from: cur.from, k, t: cur.t, prev };
+  const k = cur.t < 0 ? 1 : clamp((t - cur.t) / (cur.dur ?? tl.mo.screen.dur), 0, 1);
+  return { to: cur.to, from: cur.from, k, t: cur.t, prev, kind: cur.kind || null, app: cur.app || null };
 }
 
 export function kbAt(tl, t) {

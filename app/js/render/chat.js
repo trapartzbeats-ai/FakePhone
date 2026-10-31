@@ -5,9 +5,9 @@ import { graphemes, ease, easeBack, prog, lerp, clamp, rnd, hashInt } from '../u
 import { composeAt, kbAt, recordAt } from '../timeline.js';
 import { lin, val } from '../motion.js';
 import { kbHeight } from '../keys.js';
-import { visual, frameAt } from '../media.js';
+import { visual, frameAt, videoOf, syncVideo } from '../media.js';
 import { chatTitle, nameOf, contact } from '../model.js';
-import { rr, fillRR, circle, tw, wrap, lineWithLinks, icon, chevron, sendArrow, avatar, ellipsize } from './draw.js';
+import { rr, fillRR, circle, tw, wrap, lineWithLinks, icon, chevron, sendArrow, avatar, avatarOf, ellipsize } from './draw.js';
 import { drawKeyboard } from './keyboard.js';
 
 export const STYLE = {
@@ -20,7 +20,7 @@ const TYPING = { w: 64, h: 38 };
 
 const mcache = new Map();
 function metrics(ctx, R, it) {
-  const v = it.mediaId ? visual(it.mediaId) : null;
+  const v = it.mediaId ? (it.kind === 'video' ? videoOf(it.mediaId, it.evId) : visual(it.mediaId)) : null;
   const key = `${R.sig}|${it.id}|${it.kind}|${it.text || ''}|${it.mediaId || ''}|${v ? 1 : 0}`;
   let m = mcache.get(key);
   if (m) return m;
@@ -31,10 +31,11 @@ function metrics(ctx, R, it) {
   else if (it.kind === 'voice') {
     const w = clamp(Math.round(176 + it.dur * 8), 196, Math.round(R.W * 0.7));
     m = { w: R.fam === 'whatsapp' ? w + 44 : w, h: R.fam === 'whatsapp' ? 58 : R.fam === 'android' ? 52 : 44 };
-  } else if (it.kind === 'image') {
-    let w = 220, h = 160;
+  } else if (it.kind === 'image' || it.kind === 'video') {
+    let w = 220, h = it.kind === 'video' ? 300 : 160;
     if (v) {
-      const s = Math.min(Math.round(R.W * 0.62) / v.w, 300 / v.h);
+      // videos are shown larger than pictures
+      const s = it.kind === 'video' ? Math.min(Math.round(R.W * 0.66) / v.w, 360 / v.h) : Math.min(Math.round(R.W * 0.62) / v.w, 300 / v.h);
       w = Math.round(v.w * s); h = Math.round(v.h * s);
       if (w < 120) { h = Math.round(h * 120 / w); w = 120; }
     }
@@ -67,7 +68,7 @@ function metrics(ctx, R, it) {
   return m;
 }
 
-const isBubble = (it) => it.kind === 'msg' || it.kind === 'image' || it.kind === 'voice';
+const isBubble = (it) => it.kind === 'msg' || it.kind === 'image' || it.kind === 'video' || it.kind === 'voice';
 
 // Rows on screen at time t with their animated heights.
 function layout(ctx, R, t) {
@@ -280,6 +281,7 @@ function drawRow(ctx, R, v, by, t) {
   if (k === 'typing') drawTyping(ctx, R, x, by, t);
   else if (k === 'voice') drawVoiceBubble(ctx, R, v, x, by, t);
   else if (k === 'image') drawImageBubble(ctx, R, it, x, by, w, h, t);
+  else if (k === 'video') drawVideoBubble(ctx, R, it, x, by, w, h, t);
   else if (v.m.big) {
     ctx.font = emojiFont(v.m.size);
     ctx.textAlign = 'left';
@@ -435,6 +437,39 @@ function drawImageBubble(ctx, R, it, x, y, w, h, t) {
   ctx.restore();
 }
 
+// Video message: the first frame with a play button, then the video playing (time left in the corner).
+function drawVideoBubble(ctx, R, it, x, y, w, h, t) {
+  const v = videoOf(it.mediaId, it.evId);
+  const tPlay = it.tPlay ?? Infinity;
+  const playing = t >= tPlay && t < tPlay + it.dur;
+  const lt = clamp(t - tPlay, 0, it.dur);
+  ctx.save();
+  rr(ctx, x, y, w, h, R.fam === 'whatsapp' ? 8 : 18);
+  ctx.clip();
+  if (v) {
+    syncVideo(v, lt, playing);
+    const k = Math.max(w / v.w, h / v.h);
+    ctx.drawImage(v.el, x + (w - v.w * k) / 2, y + (h - v.h * k) / 2, v.w * k, v.h * k);
+  } else {
+    ctx.fillStyle = '#1b1b1f';
+    ctx.fillRect(x, y, w, h);
+  }
+  if (!playing) {
+    circle(ctx, x + w / 2, y + h / 2, 25, 'rgba(0,0,0,0.5)');
+    ctx.beginPath(); ctx.moveTo(x + w / 2 - 7, y + h / 2 - 11); ctx.lineTo(x + w / 2 - 7, y + h / 2 + 11); ctx.lineTo(x + w / 2 + 13, y + h / 2); ctx.closePath();
+    ctx.fillStyle = '#FFFFFF'; ctx.fill();
+  }
+  const left = t >= tPlay + it.dur ? it.dur : Math.max(0, it.dur - lt);     // the full length again once it has played
+  const sec = Math.ceil(left - 1e-6);
+  const label = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  ctx.font = font(11.5, 600);
+  const pw = tw(ctx, label) + 16;
+  fillRR(ctx, x + 8, y + h - 26, pw, 19, 9.5, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + 16, y + h - 16.5);
+  ctx.restore();
+}
+
 function drawTyping(ctx, R, x, y, t) {
   const { pal } = R;
   const w = TYPING.w, h = TYPING.h;
@@ -549,6 +584,13 @@ function doodles(ctx, W, H, color) {
 }
 
 // ---- header ---------------------------------------------------------------------
+// The group photo in a group chat that has one, else the first person.
+function headerAvatar(ctx, R, cx, cy, r, t, opts = {}) {
+  const { p } = R;
+  if (R.group && p.chat.avatar) avatarOf(ctx, { name: chatTitle(p), color: '#8E8E93', avatar: p.chat.avatar }, cx, cy, r, t, opts);
+  else avatar(ctx, p, p.chat.members[0], cx, cy, r, t, opts);
+}
+
 function drawHeader(ctx, R, t) {
   const { W, pal, S, dev, p } = R;
   const top = dev.safeTop;
@@ -564,10 +606,10 @@ function drawHeader(ctx, R, t) {
 
   if (R.fam === 'ios') {
     chevron(ctx, 14, top + 26, 21, pal.accent, 'left', 3);
-    if (R.group) {
+    if (R.group && !p.chat.avatar) {
       const ids = p.chat.members.slice(0, 3);
       ids.forEach((id, i) => avatar(ctx, p, id, W / 2 + (i - (ids.length - 1) / 2) * 22, top + 25, 17, t, { ios: true }));
-    } else avatar(ctx, p, who, W / 2, top + 25, 25, t, { ios: true });
+    } else headerAvatar(ctx, R, W / 2, top + 25, 25, t, { ios: true });
     ctx.font = font(11.5, 400);
     const nm = ellipsize(ctx, title, W - 140);
     const nw = tw(ctx, nm);
@@ -580,7 +622,7 @@ function drawHeader(ctx, R, t) {
   } else if (R.fam === 'android') {
     const cy = top + S.headerH / 2;
     icon(ctx, 'back', 26, cy, 24, pal.headerText);
-    avatar(ctx, p, who, 70, cy, 19, t);
+    headerAvatar(ctx, R, 70, cy, 19, t);
     ctx.font = font(19, 400);
     ctx.fillStyle = pal.headerText;
     ctx.textAlign = 'left';
@@ -594,7 +636,7 @@ function drawHeader(ctx, R, t) {
     const androidOS = R.pal.os === 'android';
     if (androidOS) icon(ctx, 'back', 22, cy, 23, pal.headerText);
     else chevron(ctx, 12, cy, 20, ac, 'left', 3);
-    avatar(ctx, p, who, androidOS ? 62 : 52, cy, 18, t);
+    headerAvatar(ctx, R, androidOS ? 62 : 52, cy, 18, t);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const nx = androidOS ? 88 : 78;
@@ -612,7 +654,7 @@ function drawHeader(ctx, R, t) {
   } else {
     const cy = top + S.headerH / 2;
     chevron(ctx, 14, cy, 20, pal.headerText, 'left', 2.6);
-    avatar(ctx, p, who, 56, cy, 18, t);
+    headerAvatar(ctx, R, 56, cy, 18, t);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = font(15.5, 700);
@@ -939,6 +981,7 @@ function drawRecordingBar(ctx, R, bar, top, rec, t) {
 export function drawBubbleCopy(ctx, R, v, x, y, t) {
   if (v.it.kind === 'voice') drawVoiceBubble(ctx, R, v, x, y, t);
   else if (v.it.kind === 'image') drawImageBubble(ctx, R, v.it, x, y, v.m.w, v.m.h, t);
+  else if (v.it.kind === 'video') drawVideoBubble(ctx, R, v.it, x, y, v.m.w, v.m.h, t);
   else if (v.m.big) { ctx.font = emojiFont(v.m.size); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(v.it.text.trim(), x + 2, y + v.m.h / 2 + 2); }
   else drawTextBubble(ctx, R, { ...v, it: { ...v.it, inkUntil: 0 }, last: true, first: true }, x, y, t);
 }
