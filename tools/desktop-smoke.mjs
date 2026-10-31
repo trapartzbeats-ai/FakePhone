@@ -152,14 +152,22 @@ check('no page errors (second launch)', a.errors().length === 0, a.errors().slic
 await a.close();
 
 // ---- third launch, the way people start it: no debugger attached; desktop.log is the only window in
-const plain = spawnApp();
+// (the old log says "page loaded" too, so it goes first; slow machines need the full minute)
 const logFile = path.join(WORK, 'data', 'desktop.log');
+fs.rmSync(logFile, { force: true });
+const plain = spawnApp();
 let plainLog = '';
-for (let i = 0; i < 120 && !/page loaded/.test(plainLog); i++) { await sleep(250); try { plainLog = fs.readFileSync(logFile, 'utf8'); } catch { /* not written yet */ } }
+for (let i = 0; i < 240 && !/page loaded/.test(plainLog); i++) { await sleep(250); try { plainLog = fs.readFileSync(logFile, 'utf8'); } catch { /* not written yet */ } }
 await sleep(3000);
 plainLog = fs.readFileSync(logFile, 'utf8');
 check('plain launch: page loads', /page loaded/.test(plainLog));
 check('plain launch: no page errors in desktop.log', !/page error|renderer gone/.test(plainLog), plainLog.split('\n').filter((l) => /page error|renderer gone/.test(l)).map((l) => l.slice(25)).join(' | '));
+// opening it again while it runs: the second copy quits on its own and leaves the first one's log alone
+const twice = spawnApp();
+for (let i = 0; i < 80 && twice.exitCode === null && twice.signalCode === null; i++) await sleep(250);
+const quitAlone = twice.exitCode !== null;
+if (!quitAlone) twice.kill();
+check('a second copy quits and leaves the log alone', quitAlone && /page loaded/.test(fs.readFileSync(logFile, 'utf8')));
 plain.kill();
 await exited(plain);
 

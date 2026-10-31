@@ -15,7 +15,9 @@ if (process.env.FAKEPHONE_DATA_DIR) app.setPath('userData', process.env.FAKEPHON
 // secure: WebCodecs, ImageDecoder and the microphone need a secure context
 protocol.registerSchemesAsPrivileged([{ scheme: 'fakephone', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } }]);
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// a second copy only hands focus to the first (below) and quits, touching nothing
+const PRIMARY = app.requestSingleInstanceLock();
+if (!PRIMARY) app.quit();
 
 const SETTINGS = path.join(app.getPath('userData'), 'desktop.json');
 const settings = (() => { try { return JSON.parse(fs.readFileSync(SETTINGS, 'utf8')); } catch { return {}; } })();
@@ -24,7 +26,7 @@ const saveSettings = () => { fs.mkdirSync(path.dirname(SETTINGS), { recursive: t
 // desktop.log in the user folder: startup info and page errors (a GUI app has no console to read)
 const LOG = path.join(app.getPath('userData'), 'desktop.log');
 fs.mkdirSync(path.dirname(LOG), { recursive: true });
-fs.writeFileSync(LOG, '');
+if (PRIMARY) fs.writeFileSync(LOG, '');
 const log = (...a) => { try { fs.appendFileSync(LOG, `${new Date().toISOString()} ${a.join(' ')}\n`); } catch { /* best effort */ } };
 
 // ffmpeg muxes the exports: bundled in resources/ffmpeg when installed, the ffmpeg-static package from source
@@ -38,6 +40,7 @@ app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(
 app.on('window-all-closed', () => app.quit());
 
 app.whenReady().then(async () => {
+  if (!PRIMARY) return;
   const { port, ffmpeg } = await startServer({
     port: 0,
     exportsDir: process.env.FAKEPHONE_EXPORTS || settings.exportsDir || path.join(app.getPath('documents'), 'Fake Phone'),

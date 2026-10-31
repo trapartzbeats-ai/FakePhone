@@ -41,7 +41,7 @@ npm install
 npm run desktop                                # run from source
 npm run dist                                   # Windows: dist/FakePhone-Setup-<version>.exe
 npm run dist:mac                               # on a Mac: dist/FakePhone-<version>-mac-<arch>.dmg
-node tools/desktop-smoke.mjs                   # 20 checks from source (throwaway data in D:\Cache\fakephone-smoke)
+node tools/desktop-smoke.mjs                   # 21 checks from source (throwaway data in D:\Cache\fakephone-smoke)
 node tools/desktop-smoke.mjs "C:\...\Fake Phone.exe"   # the same checks on an installed copy
 ```
 
