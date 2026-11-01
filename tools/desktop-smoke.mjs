@@ -18,6 +18,8 @@ const ARGS = process.argv[2] ? [] : [ROOT];
 const WORK = process.env.FAKEPHONE_SMOKE_DIR || path.join(fs.existsSync('D:/Cache') ? 'D:/Cache' : os.tmpdir(), 'fakephone-smoke');
 const FFMPEG = require('ffmpeg-static');
 const PORT = 9339;
+const AGENT_PORT = 47689;                 // not the real 47680, so a running Fake Phone is left alone
+const AGENT_TOKEN = 'smoke-test-token-0123456789abcdef0123456789abcdef';
 
 const results = [];
 const check = (name, ok, info = '') => { results.push({ name, ok: !!ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  ' + info : ''}`); };
@@ -26,7 +28,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a covered window stops painting (screenshots then never come back), so keep it drawing
 const FLAGS = ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
 const spawnApp = (extra = []) => spawn(EXE, [...ARGS, ...extra, ...FLAGS], {
-  env: { ...process.env, FAKEPHONE_DATA_DIR: path.join(WORK, 'data'), FAKEPHONE_EXPORTS: path.join(WORK, 'exports') },
+  env: { ...process.env, FAKEPHONE_DATA_DIR: path.join(WORK, 'data'), FAKEPHONE_EXPORTS: path.join(WORK, 'exports'), FAKEPHONE_AGENT_PORT: String(AGENT_PORT) },
   stdio: 'ignore',
 });
 const exited = async (proc) => {
@@ -87,7 +89,9 @@ async function launch() {
 }
 
 fs.rmSync(WORK, { recursive: true, force: true });
-fs.mkdirSync(WORK, { recursive: true });
+fs.mkdirSync(path.join(WORK, 'data'), { recursive: true });
+// AI control starts switched on with a known token (the app keeps it in desktop.json)
+fs.writeFileSync(path.join(WORK, 'data', 'desktop.json'), JSON.stringify({ agent: { enabled: true, token: AGENT_TOKEN } }));
 console.log(`app: ${EXE}\nwork: ${WORK}\n`);
 
 // ---- first launch
@@ -186,6 +190,97 @@ else {
   const vol = (from, to) => Number((spawnSync(FFMPEG, ['-hide_banner', '-ss', String(from), '-t', String(to - from), '-i', vid.file, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr.match(/mean_volume: (-?[\d.]+) dB/) || [])[1]);
   const during = vol(vid.pl.tPlay + 0.3, vid.pl.tPlay + 2.7);
   check('the clip\'s sound is in the video while it plays', during > -35, `${during} dB`);
+}
+// ---- AI control: the local API and the MCP server, driven from outside like an AI would
+{
+  const base = `http://127.0.0.1:${AGENT_PORT}`;
+  const api = async (cmd, args = {}, timeoutSec) => (await fetch(`${base}/agent/call`, { method: 'POST', headers: { authorization: `Bearer ${AGENT_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ cmd, args, timeoutSec }) })).json();
+  const status = (headers) => fetch(`${base}/agent/status`, { headers }).then((r) => r.status);
+  check('API refuses a missing or wrong token', (await status({})) === 401 && (await status({ authorization: 'Bearer wrong' })) === 401);
+  check('API refuses requests that carry a browser Origin', (await status({ authorization: `Bearer ${AGENT_TOKEN}`, origin: 'http://evil.example' })) === 403);
+  let st = null;
+  for (let i = 0; i < 40 && !st?.pageConnected; i++) { st = await fetch(`${base}/agent/status`, { headers: { authorization: `Bearer ${AGENT_TOKEN}` } }).then((r) => r.json()).catch(() => null); if (!st?.pageConnected) await sleep(500); }
+  check('the app window is connected to the API', st?.ok && st.pageConnected, JSON.stringify(st));
+
+  const np = await api('new_project', { name: 'ai smoke' });
+  const pe = await api('set_person', { who: 'Jess', create: true, color: '#FF2D55' });
+  const sc = await api('set_script', { script: 'Jess: you coming tonight?\nme: yes! {confetti}\n[notify Jess: tagged you in a photo {facebook}]' });
+  const pj = await api('get_project', { include_script: true });
+  check('script, person and project calls work', np.ok && pe.ok && sc.ok && pj.ok && pj.result.events.length === 3 && pj.result.duration > 3 && pj.result.people.some((x) => x.name === 'Jess'),
+    pj.ok ? `${pj.result.events.length} events, ${pj.result.duration}s` : pj.error);
+  const bad = await api('set_project', { theme: 'nope' });
+  const typo = await api('add_event', { type: 'msg', fields: { texxt: 'x' } });
+  check('mistakes come back as clear errors that list the choices', !bad.ok && /imessage, sms/.test(bad.error) && !typo.ok && /Fields:/.test(typo.error), `${bad.error} | ${typo.error}`);
+  const look = await api('set_project', { theme: 'whatsapp', dark: true, device: 'android', status: { battery: 40 } });
+  check('look settings apply', look.ok && look.result.look.theme === 'whatsapp' && look.result.look.dark === true && look.result.look.status.battery === 40);
+
+  const png = path.join(WORK, 'exports', 'face.png');
+  spawnSync(FFMPEG, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=200x200:rate=1', '-frames:v', '1', png]);
+  const up = await api('upload_media', { data_base64: fs.readFileSync(png).toString('base64'), mime: 'image/png', name: 'face.png' });
+  const ph = up.ok ? await api('set_photo', { target: 'me', media_id: up.result.id }) : up;
+  const after = await api('get_project');
+  check('a picture uploads and becomes a profile photo', up.ok && up.result.kind === 'image' && ph.ok && after.result.me.hasPhoto, up.ok ? '' : up.error);
+
+  const pv = await api('preview', { times: [0.5, 2.5, 5], sheet: true, width: 240 });
+  const jpg = pv.ok ? Buffer.from(pv.result.images[0].data_base64, 'base64') : Buffer.alloc(0);
+  check('preview returns a real JPEG grid of the video', pv.ok && jpg[0] === 0xff && jpg[1] === 0xd8 && jpg.length > 5000, pv.ok ? `${jpg.length} bytes` : pv.error);
+
+  const plan = await api('generate_voices', {});
+  check('voice plan spends nothing and shows no key', plan.ok && plan.result.generated === 0 && /confirm/.test(plan.result.note) && !JSON.stringify(plan).includes('xi-api-key'));
+
+  const ex = await api('export_video', { resolution: '720', name: 'ai smoke' }, 600);
+  const exProbe = ex.ok ? spawnSync(FFMPEG, ['-hide_banner', '-i', ex.result.file], { encoding: 'utf8' }).stderr : '';
+  check('export_video makes an MP4 with sound', ex.ok && /Video: h264.*720x1280/.test(exProbe) && /Audio: aac/.test(exProbe), ex.ok ? path.basename(ex.result.file) : ex.error);
+
+  // a client that gives up must not leave the export blocking everything behind it
+  const tmpJobs = () => { try { return fs.readdirSync(path.join(os.tmpdir(), 'fake-phone-export')).length; } catch { return 0; } };
+  const jobsBefore = tmpJobs();
+  const ctl = new AbortController();
+  const gone = fetch(`${base}/agent/call`, { method: 'POST', signal: ctl.signal, headers: { authorization: `Bearer ${AGENT_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ cmd: 'export_video', args: { resolution: '1080', name: 'ai cancel' } }) }).catch(() => 'aborted');
+  await sleep(1500); ctl.abort(); await gone;
+  const t1 = Date.now();
+  const next = await api('get_project', {}, 60);
+  await sleep(1500);
+  check('hanging up cancels a running export and leaves nothing behind', next.ok && Date.now() - t1 < 20000 && !fs.readdirSync(path.join(WORK, 'exports')).some((n) => n.startsWith('ai cancel')) && tmpJobs() <= jobsBefore,
+    `next command answered in ${((Date.now() - t1) / 1000).toFixed(1)}s, temp job folders ${jobsBefore} -> ${tmpJobs()}`);
+
+  // the MCP server, started exactly as the app's AI control panel says to
+  const cfg = await a.run(`return await (await fetch('/api/agent/config')).json();`);
+  check('the app gives out a ready-to-use MCP setup', cfg.enabled && cfg.listening && cfg.mcp?.command && cfg.mcp.args?.[0]?.endsWith('fake-phone-mcp.mjs') && cfg.mcp.env.FAKE_PHONE_TOKEN === AGENT_TOKEN, cfg.mcp ? cfg.mcp.args[0] : 'no mcp');
+  if (cfg.mcp) {
+    const proc = spawn(cfg.mcp.command, cfg.mcp.args, { env: { ...process.env, ...cfg.mcp.env }, stdio: ['pipe', 'pipe', 'ignore'] });
+    let buf = '';
+    const waiting = new Map();
+    proc.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line.trim()) continue; const m = JSON.parse(line); if (m.id != null && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); } } });
+    let seq = 0;
+    const rpc = (method, params) => new Promise((res, rej) => { const id = ++seq; waiting.set(id, res); setTimeout(() => rej(new Error(`${method}: no answer`)), 120000).unref(); proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+    try {
+      const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } });
+      proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+      const tools = (await rpc('tools/list')).result.tools;
+      const pageCmds = (await api('agent_commands')).result;
+      const orphans = tools.map((t) => t.name).filter((n) => n !== 'status' && !pageCmds.includes(n));
+      check('MCP server starts, speaks MCP and lists its tools', init.result?.serverInfo?.name === 'fake-phone' && tools.length >= 20, `${tools.length} tools`);
+      check('every MCP tool has a command in the app', orphans.length === 0, orphans.join(', '));
+      const gp = (await rpc('tools/call', { name: 'get_project', arguments: {} })).result;
+      const pvm = (await rpc('tools/call', { name: 'preview', arguments: { times: [1], width: 200 } })).result;
+      const badm = (await rpc('tools/call', { name: 'set_project', arguments: { theme: 'nope' } })).result;
+      check('MCP tool calls reach the app, return images and report errors', !gp.isError && JSON.parse(gp.content[0].text).events.length === 3 && pvm.content.some((c) => c.type === 'image') && badm.isError === true,
+        `${gp.isError ? 'get_project failed' : ''} ${badm.isError ? '' : 'bad value was not an error'}`);
+    } catch (e) { check('MCP session', false, e.message); }
+    proc.stdin.end();
+    await new Promise((r) => { proc.on('exit', r); setTimeout(() => { proc.kill(); r(); }, 5000); });
+  }
+
+  // the settings behind the panel: new token, turn off, turn on (kept in desktop.json)
+  const rot = await a.run(`return await (await fetch('/api/agent/config', { method: 'POST', body: JSON.stringify({ rotate: true }) })).json();`);
+  const saved = () => JSON.parse(fs.readFileSync(path.join(WORK, 'data', 'desktop.json'), 'utf8')).agent;
+  check('a new token replaces the old one and is saved', rot.token && rot.token !== AGENT_TOKEN && saved().token === rot.token && (await status({ authorization: `Bearer ${AGENT_TOKEN}` })) === 401 && (await status({ authorization: `Bearer ${rot.token}` })) === 200);
+  await a.run(`return await (await fetch('/api/agent/config', { method: 'POST', body: JSON.stringify({ enabled: false }) })).json();`);
+  const refused = await fetch(`${base}/agent/status`).then(() => false, () => true);
+  check('turning it off closes the port and is saved', refused && saved().enabled === false);
+  const on = await a.run(`return await (await fetch('/api/agent/config', { method: 'POST', body: JSON.stringify({ enabled: true }) })).json();`);
+  check('turning it on again listens with the same token', on.listening && on.token === rot.token && saved().enabled === true);
 }
 check('no page errors (second launch)', a.errors().length === 0, a.errors().slice(0, 3).join(' | '));
 await a.close();

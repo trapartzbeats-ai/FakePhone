@@ -69,6 +69,9 @@ export async function exportVideo({ p, tl, engine, width, height, fps, name, onP
     if (pendingBytes > 4e6) await flush();
     if (i % 10 === 0) { onProgress(i / total, `Rendering frame ${i} / ${total}`); await new Promise((r) => setTimeout(r, 0)); }
   }
+  } catch (err) {
+    fetch(`/api/export/${job}/abort`, { method: 'POST' }).catch(() => {});      // do not leave the half-uploaded video on disk
+    throw err;
   } finally { setVideoExport(false); }
   await enc.flush();
   enc.close();

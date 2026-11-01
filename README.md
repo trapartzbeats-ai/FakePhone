@@ -41,7 +41,7 @@ npm install
 npm run desktop                                # run from source
 npm run dist                                   # Windows: dist/FakePhone-Setup-<version>.exe
 npm run dist:mac                               # on a Mac: dist/FakePhone-<version>-mac-<arch>.dmg
-node tools/desktop-smoke.mjs                   # 26 checks from source (throwaway data in D:\Cache\fakephone-smoke)
+node tools/desktop-smoke.mjs                   # 44 checks from source (throwaway data in D:\Cache\fakephone-smoke)
 node tools/desktop-smoke.mjs "C:\...\Fake Phone.exe"   # the same checks on an installed copy
 node tools/model-check.mjs                     # old projects still open, the new script commands round-trip
 ```
@@ -66,6 +66,23 @@ The page loads from `fakephone://app` (a secure origin, so WebCodecs and the mic
 - **Motion:** every animation runs on a PulseCore curve (`app/js/vendor/pulse`, easing + spring physics); the Motion tab sets the curve and length per animation.
 - **Export:** rendered frame by frame (WebCodecs H.264 + an offline audio mix, muxed by ffmpeg) into `exports/` (desktop app: `Documents\Fake Phone`). 1080x1920 or 720x1280, 30/60 fps.
 - **Projects** autosave in the browser (IndexedDB). "Save project file" writes one .json with images and audio inside.
+
+## AI control (API + MCP)
+
+An AI can drive the open app: write the script, change the look, upload pictures and videos, set photos and the home screen, look at frames, and export the MP4. It is **off by default**, only listens on this computer (`127.0.0.1:47680`), and needs a token.
+
+1. In the app: **Voices & Keys > AI control**, switch it on. The panel shows the token and a ready-made setup to copy:
+   - Claude Desktop: paste the JSON into `claude_desktop_config.json`.
+   - Claude Code: run the `claude mcp add fake-phone ...` line it shows.
+2. Ask the AI to start with the `guide` tool. The app has to stay open (the work happens in its window, so you can watch).
+
+The MCP server is `mcp/fake-phone-mcp.mjs` (no dependencies). In the installed app it runs on the app's own Node (`ELECTRON_RUN_AS_NODE=1`), so nothing else is installed. From source: `node server.js --agent` (token in `agent.json`), then `node mcp/fake-phone-mcp.mjs` with `FAKE_PHONE_TOKEN` set.
+
+Tools: `guide`, `status`, `get_project`, `get_script`, `set_script`, `add_event`, `update_event`, `remove_event`, `set_project` (look, status bar, wallpaper...), `set_person`, `remove_person`, `upload_media`, `set_photo`, `set_inbox`, `set_home`, `preview` (frames as images, or one grid), `list_voices`, `generate_voices`, `export_video`, `list_projects`, `new_project`, `open_project`, `duplicate_project`, `undo`, `redo`. Bad input comes back as an error that lists what is allowed.
+
+Safety: the ElevenLabs key is never sent to the AI; `generate_voices` only spends credits with `confirm:true` (without it, it returns the plan); a request carrying a browser `Origin`, a wrong Host or no token is refused; a client that hangs up cancels the command it started (an export stops). The AI works on whatever project is open, so tell it to use `new_project` / `duplicate_project` first for anything you want to keep.
+
+Plain HTTP works too: `POST http://127.0.0.1:47680/agent/call` with `Authorization: Bearer <token>` and `{"cmd":"get_project","args":{}}`; `GET /agent/status`. The commands are the tool names above. `tools/desktop-smoke.mjs` tests all of this (token, origin, cancel, MCP handshake and tool calls, token rotation) on the built app.
 
 ## Script format
 
@@ -102,7 +119,7 @@ Lines above `---` are already on screen when the video starts.
 
 ## Layout
 
-- `server.js` - static server, ElevenLabs/GIPHY proxy, export muxing (ffmpeg)
+- `server.js` - static server, ElevenLabs/GIPHY proxy, export muxing (ffmpeg); `agent.js` - the AI control API (token, bridge to the open window); `mcp/fake-phone-mcp.mjs` - the MCP server; `app/js/agent.js` - the commands the window runs
 - `desktop/main.js` - the Electron app (window, `fakephone://` protocol, bundled ffmpeg, exports folder)
 - `app/fonts/` - local copies of Anton, Inter, Roboto, Noto Color Emoji (SIL OFL)
 - `app/js/timeline.js` - compiles the script into a timed timeline (everything is a function of time, so scrubbing and export are exact)

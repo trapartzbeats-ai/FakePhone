@@ -5,6 +5,9 @@ exports/
 dist/
 
 node_modules/
+
+# AI control token (browser version)
+agent.json
 *.log
 .env
 .env.*

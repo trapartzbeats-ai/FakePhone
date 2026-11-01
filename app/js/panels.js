@@ -8,6 +8,8 @@ import { drawApp } from './render/appicons.js';
 import { APP_CHOICES, APP_NAMES, themeApp } from './apps.js';
 import { SOUND_SLOTS, FX_SOUNDS, peaksOf } from './audio.js';
 import { ELEVEN_MODELS, listVoices, tts, ttsKey, usesStyle, MicRecorder, trimTake } from './voice.js';
+import { voiceLines, missingVoices, generateVoices } from './voicegen.js';
+import { agentConfig, ensureAgentLoop, stopAgentUi } from './agent.js';
 import { MOTION_KEYS, EASE_NAMES, SPRINGS, curve } from './motion.js';
 import { exportVideo } from './export.js';
 import { uid, IS_MAC, MOD } from './util.js';
@@ -543,21 +545,14 @@ export class Panels {
       h('p', { class: 'hint' }, `${lines.length} lines in the script, ${assigned.length} have a speaker with a voice, ${lines.filter((l) => l.owner.voice?.mediaId).length} already have audio. Give people voices in People.`),
       btn('Generate all missing AI voices', async (e) => {
         if (!s.elevenKey) { toast('Add your API key first', 'error'); return; }
-        const todo = assigned.filter((l) => !l.owner.voice?.mediaId || (l.owner.voice.src === 'tts' && l.owner.voice.key !== ttsKey(l.voiceId, l.say, s.eleven)));
+        const todo = missingVoices(assigned, s.eleven);
         if (!todo.length) { toast('Nothing to generate'); return; }
         e.target.disabled = true;
-        let done = 0;
-        for (const l of todo) {
-          e.target.textContent = `Generating ${++done} / ${todo.length}…`;
-          try {
-            const blob = await tts(s.elevenKey, l.voiceId, l.say, s.eleven);
-            const rec = await addMediaBlob(blob, 'tts', { kind: 'audio' });
-            const buf = await this.ed.engine.loadMedia(rec.id);
-            l.owner.voice = { ...(l.owner.voice || {}), src: 'tts', mediaId: rec.id, dur: buf?.duration || 0, peaks: buf ? peaksOf(buf) : null, key: ttsKey(l.voiceId, l.say, s.eleven) };
-          } catch (err) { toast(err.message, 'error'); break; }
-        }
+        try {
+          await generateVoices(this.ed.engine, s.elevenKey, s.eleven, todo, (done, total) => { e.target.textContent = `Generating ${Math.min(done + 1, total)} / ${total}…`; });
+          toast('Voices generated');
+        } catch (err) { toast(err.message, 'error'); }
         this.set(() => {}, null, { inspector: true });
-        toast('Voices generated');
       }, 'primary')));
 
     // narration over the whole video
@@ -599,25 +594,45 @@ export class Panels {
       field('API key', h('input', { type: 'password', value: s.giphyKey || '', placeholder: 'GIPHY key', oninput: (e) => { s.giphyKey = e.target.value.trim(); this.ed.saveSettings(); } }),
         'Optional. Without it you can still upload your own GIFs.'),
       h('a', { href: 'https://developers.giphy.com/dashboard/', target: '_blank', class: 'link' }, 'Get a GIPHY key')));
+    w.append(this.aiControl());
     return w;
   }
 
-  // Every spoken line in the script with who says it and which voice would be used.
-  voiceLines() {
-    const p = this.p;
-    const out = [];
-    const add = (owner, who, txt) => {
-      const say = (owner.voice?.say || txt || '').trim();
-      if (!say) return;
-      out.push({ owner, who, say, voiceId: owner.voice?.voiceId || voiceIdOf(p, who) });
+  // ---- AI control: a local API + MCP server so an AI can drive the app --------------------------------
+  aiControl() {
+    const box = h('div', { class: 'ai-box' });
+    const sec = section('AI control (API + MCP)', box);
+    const copy = (txt, what) => { navigator.clipboard?.writeText(txt).then(() => toast(`${what} copied`), () => toast('Could not copy', 'error')); };
+    const draw = (c) => {
+      box.textContent = '';
+      box.append(
+        h('p', { class: 'hint' }, 'Lets an AI (Claude, through MCP) write the script, change the look, check frames and export the video in this app. It only listens on this computer and needs the token below. Off by default.'),
+        field('Let an AI control Fake Phone', toggle(!!c.enabled, async (v) => { draw(await agentConfig({ enabled: v })); if (v) ensureAgentLoop(); else stopAgentUi(); })));
+      if (!c.enabled) return;
+      box.append(h('div', { class: 'ai-status' + (c.listening ? ' ok' : ' bad') },
+        c.listening ? `Listening on ${c.url} · ${c.pageConnected ? 'this window is connected' : 'waiting for this window'}` : (c.error || 'Not listening')));
+      if (!c.listening) return;
+      box.append(
+        field('Token', row(h('input', { type: 'text', readonly: true, value: c.token, class: 'grow' }), btn('Copy', () => copy(c.token, 'Token'), 'ghost small'),
+          btn('New token', async () => { if (confirm('Make a new token? Anything using the old one stops working.')) draw(await agentConfig({ rotate: true })); }, 'ghost small'))));
+      if (c.mcp) {
+        const json = JSON.stringify({ mcpServers: { 'fake-phone': { command: c.mcp.command, args: c.mcp.args, env: c.mcp.env } } }, null, 2);
+        const q = (x) => (/[\s"]/.test(x) ? `"${x.replace(/"/g, '\\"')}"` : x);
+        const cli = `claude mcp add fake-phone ${Object.entries(c.mcp.env).map(([k, v]) => `-e ${k}=${q(v)}`).join(' ')} -- ${q(c.mcp.command)} ${c.mcp.args.map(q).join(' ')}`;
+        box.append(
+          field('Add it to Claude Desktop (claude_desktop_config.json)', h('pre', { class: 'code-box' }, json), null),
+          btn('Copy config', () => copy(json, 'Config'), 'ghost small'),
+          field('Or for Claude Code, run this', h('pre', { class: 'code-box' }, cli), null),
+          btn('Copy command', () => copy(cli, 'Command'), 'ghost small'),
+          h('p', { class: 'hint' }, 'The token is in those snippets, so keep them private. An AI can then call tools such as set_script, preview and export_video. Your ElevenLabs key is never sent to it, and it only spends voice credits when it passes confirm.'));
+      }
     };
-    for (const e of p.events) {
-      if (e.type === 'msg' && !e.pre && e.text) add(e, e.from, e.text);
-      if (e.type === 'voiceover') add(e, 'narrator', e.text);
-      if (e.type === 'call' && e.outcome === 'answer') for (const l of e.lines) add(l, l.from, l.text);
-    }
-    return out;
+    agentConfig().then(draw).catch(() => { box.textContent = 'AI control is not available here.'; });
+    return sec;
   }
+
+  // Every spoken line in the script with who says it and which voice would be used.
+  voiceLines() { return voiceLines(this.p); }
 
   // ---- Sound -----------------------------------------------------------------------------
   sound() {

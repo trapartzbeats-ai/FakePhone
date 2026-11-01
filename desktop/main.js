@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { startServer, exportsDir } from '../server.js';
+import { DEFAULT_AGENT_PORT } from '../agent.js';
 
 const ORIGIN = 'fakephone://app';
 
@@ -46,6 +47,13 @@ app.whenReady().then(async () => {
     exportsDir: process.env.FAKEPHONE_EXPORTS || settings.exportsDir || path.join(app.getPath('documents'), 'Fake Phone'),
     tmpDir: path.join(app.getPath('temp'), 'fake-phone-export'),
     ffmpeg: ffmpegPath(),
+    // AI control (off until the user turns it on; the token is kept with the other settings)
+    agent: {
+      enabled: !!settings.agent?.enabled, token: settings.agent?.token || '', port: Number(process.env.FAKEPHONE_AGENT_PORT) || DEFAULT_AGENT_PORT,
+      // the MCP server runs on the app's own Node (ELECTRON_RUN_AS_NODE), so nothing else needs installing
+      info: { mcp: { command: process.execPath, args: [app.isPackaged ? path.join(process.resourcesPath, 'mcp', 'fake-phone-mcp.mjs') : path.join(app.getAppPath(), 'mcp', 'fake-phone-mcp.mjs')], env: { ELECTRON_RUN_AS_NODE: '1' } } },
+      onConfig: (c) => { settings.agent = c; saveSettings(); },
+    },
     onPickFolder: async (current) => {
       const r = await dialog.showOpenDialog(win, { title: 'Where should Fake Phone save videos?', defaultPath: current, properties: ['openDirectory', 'createDirectory'] });
       if (r.canceled || !r.filePaths[0]) return null;
@@ -72,7 +80,8 @@ app.whenReady().then(async () => {
 
   win = new BrowserWindow({
     width: 1600, height: 960, minWidth: 1100, minHeight: 680, show: false, backgroundColor: '#09090b', title: 'Fake Phone',
-    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, autoplayPolicy: 'no-user-gesture-required' },
+    // backgroundThrottling off: an AI can export a video while the window is minimised or behind other windows
+    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
   });
   win.removeMenu();
   win.webContents.on('console-message', (e) => { if (e.level === 'error') log('page error:', e.message); });

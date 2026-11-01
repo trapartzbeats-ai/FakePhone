@@ -290,3 +290,13 @@ a { color: var(--lime); }
   .app { grid-template-columns: 320px 1fr; }
   .side-panel { position: fixed; right: 0; top: 56px; bottom: 0; width: 360px; z-index: 20; box-shadow: -10px 0 40px rgba(0,0,0,.5); }
 }
+
+/* AI control */
+.ai-pill { font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; background: rgba(200,255,61,.14); color: var(--lime); border: 1px solid rgba(200,255,61,.35); white-space: nowrap; }
+.ai-pill[hidden] { display: none; }
+.ai-pill.busy { background: var(--lime); color: var(--lime-ink); animation: aipulse 1s ease-in-out infinite; }
+@keyframes aipulse { 50% { opacity: .65; } }
+.ai-status { font-size: 12px; padding: 7px 10px; border-radius: 8px; background: #0e0e11; border: 1px solid var(--line); }
+.ai-status.ok { color: var(--lime); }
+.ai-status.bad { color: #ff8a80; }
+.code-box { margin: 0; padding: 9px 10px; background: #0b0b0d; border: 1px solid var(--line); border-radius: 8px; font: 11px/1.45 ui-monospace, Consolas, monospace; color: #cfd2d8; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; user-select: all; }

@@ -1,7 +1,7 @@
 {
   "name": "fake-phone",
   "productName": "Fake Phone",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "RMT Fake Phone - mock text conversations, calls and voice overs, exported as video",
   "author": "RMT (Ro Made That)",
@@ -30,11 +30,19 @@
     "files": [
       "desktop/**/*",
       "server.js",
+      "agent.js",
       "package.json",
       "app/**/*",
       "!app/dev/**/*"
     ],
     "extraResources": [
+      {
+        "from": "mcp",
+        "to": "mcp",
+        "filter": [
+          "fake-phone-mcp.mjs"
+        ]
+      },
       {
         "from": "node_modules/ffmpeg-static",
         "to": "ffmpeg",

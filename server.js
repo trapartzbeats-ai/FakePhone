@@ -5,12 +5,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createAgent, DEFAULT_AGENT_PORT } from './agent.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(ROOT, 'app');
 // set by startServer()
 let EXPORTS, TMP, FFMPEG;
 let pickFolder = null;   // desktop only: async (current) => new folder or null
+let AGENT = null;        // AI control (agent.js)
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -52,6 +54,16 @@ function safeName(s, fallback) {
   return n || fallback;
 }
 
+// export jobs that were never finished (the app was closed mid-export) are removed after an hour
+function sweepTmp() {
+  try {
+    for (const d of fs.readdirSync(TMP)) {
+      const dir = path.join(TMP, d);
+      if (Date.now() - fs.statSync(dir).mtimeMs > 3600e3) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch { /* nothing to sweep */ }
+}
+
 function uniqueFile(dir, base, ext) {
   let f = path.join(dir, base + ext);
   for (let i = 2; fs.existsSync(f); i++) f = path.join(dir, `${base} (${i})${ext}`);
@@ -80,6 +92,15 @@ async function route(req, res) {
   const p = decodeURIComponent(u.pathname);
 
   if (p === '/api/info') return send(res, 200, { ffmpeg: !!FFMPEG, exports: EXPORTS, pickFolder: !!pickFolder });
+
+  // AI control: the page polls here for commands. Only from the app itself (no foreign Origin, local Host).
+  if (p.startsWith('/api/agent/')) {
+    const host = String(req.headers.host || '');
+    const origin = req.headers.origin;
+    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) || (origin && new URL(origin).host !== host)) return send(res, 403, { error: 'forbidden' });
+    if (!AGENT) return send(res, 404, { error: 'AI control is not available' });
+    return AGENT.handleInternal(req, res, u);
+  }
 
   if (p === '/api/exports-folder' && req.method === 'POST' && pickFolder) {
     const dir = await pickFolder(EXPORTS);
@@ -112,14 +133,16 @@ async function route(req, res) {
 
   // Offline export: browser sends raw H.264 (Annex B) + a WAV mix, ffmpeg muxes to MP4.
   if (p === '/api/export/begin' && req.method === 'POST') {
+    sweepTmp();
     const job = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fs.mkdirSync(path.join(TMP, job), { recursive: true });
     return send(res, 200, { job });
   }
-  let m = p.match(/^\/api\/export\/([a-z0-9]+)\/(video|audio|finish)$/);
+  let m = p.match(/^\/api\/export\/([a-z0-9]+)\/(video|audio|finish|abort)$/);
   if (m && req.method === 'POST') {
     const dir = path.join(TMP, m[1]);
     if (!fs.existsSync(dir)) return send(res, 404, { error: 'unknown job' });
+    if (m[2] === 'abort') { fs.rmSync(dir, { recursive: true, force: true }); return send(res, 200, { ok: true }); }   // an export was cancelled or failed
     if (m[2] === 'video') { await pipeToFile(req, path.join(dir, 'v.h264'), u.searchParams.get('append') === '1'); return send(res, 200, { ok: true }); }
     if (m[2] === 'audio') { await pipeToFile(req, path.join(dir, 'a.wav'), false); return send(res, 200, { ok: true }); }
     if (!FFMPEG) return send(res, 500, { error: 'ffmpeg not found on PATH' });
@@ -187,7 +210,8 @@ async function route(req, res) {
 }
 
 // port 0 = any free port. ffmpeg = a bundled ffmpeg, else the one on PATH.
-export function startServer({ port = 5190, exportsDir = path.join(ROOT, 'exports'), tmpDir, ffmpeg, onPickFolder } = {}) {
+// agent = { enabled, token, port, info: { mcp: { command, args, env } }, onConfig(cfg) } (see agent.js)
+export function startServer({ port = 5190, exportsDir = path.join(ROOT, 'exports'), tmpDir, ffmpeg, onPickFolder, agent = {} } = {}) {
   EXPORTS = exportsDir;
   TMP = tmpDir || path.join(EXPORTS, '_tmp');
   fs.mkdirSync(EXPORTS, { recursive: true });
@@ -199,15 +223,34 @@ export function startServer({ port = 5190, exportsDir = path.join(ROOT, 'exports
   });
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve({ server, port: server.address().port, ffmpeg: FFMPEG }));
+    server.listen(port, '127.0.0.1', async () => {
+      AGENT = createAgent({ version: PKG_VERSION, ...agent });
+      await AGENT.start();
+      resolve({ server, port: server.address().port, ffmpeg: FFMPEG, agent: AGENT });
+    });
   });
 }
+
+const PKG_VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return ''; } })();
 
 export const exportsDir = () => EXPORTS;
 
 // node server.js [port] (no top-level await: the desktop app imports this before Electron is ready)
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startServer({ port: Number(process.argv[2] || process.env.PORT || 5190) }).then(({ port, ffmpeg }) => {
+  // AI control in the browser version: --agent turns it on; the token lives in agent.json next to this file
+  const agentFile = path.join(ROOT, 'agent.json');
+  const saved = (() => { try { return JSON.parse(fs.readFileSync(agentFile, 'utf8')); } catch { return {}; } })();
+  startServer({
+    port: Number(process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : process.env.PORT || 5190),
+    agent: {
+      enabled: process.argv.includes('--agent') || !!saved.enabled, token: saved.token || '',
+      port: Number(process.env.FAKEPHONE_AGENT_PORT) || DEFAULT_AGENT_PORT,
+      info: { mcp: { command: process.execPath, args: [path.join(ROOT, 'mcp', 'fake-phone-mcp.mjs')], env: {} } },
+      onConfig: (c) => { try { fs.writeFileSync(agentFile, JSON.stringify(c, null, 2)); } catch { /* read-only folder */ } },
+    },
+  }).then(({ port, ffmpeg, agent }) => {
     console.log(`Fake Phone running at http://localhost:${port}  (ffmpeg: ${ffmpeg ? 'yes' : 'no'})`);
+    const a = agent.publicConfig();
+    if (a.enabled) console.log(a.listening ? `AI control on at ${a.url}  token: ${a.token}` : `AI control could not start: ${a.error}`);
   });
 }
